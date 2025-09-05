@@ -190,6 +190,13 @@ if videos:
                     st.caption(f"Size: {size:.2f} MB")
                     if size > MAX_TRANSCRIBE_MB:
                         st.markdown("<span style='color:#cc0000'>Exceeds 25 MB limit; will be skipped.</span>", unsafe_allow_html=True)
+                # Per-item metadata inputs
+                speaker_key = f"speaker_{start}_{idx}_{v['name']}"
+                footer_key = f"footer_{start}_{idx}_{v['name']}"
+                speaker_val = st.text_input("Name", key=speaker_key, value=v.get("speaker", ""))
+                footer_val = st.text_area("Footer", key=footer_key, value=v.get("footer", ""), height=80)
+                v["speaker"] = speaker_val
+                v["footer"] = footer_val
 
     c1, c2 = st.columns([1,1])
     clear_clicked = c2.button("Clear queued list")
@@ -223,7 +230,7 @@ if videos:
                 v["status"] = "transcribing"
                 transcript = transcribe_video(v["path"]) or ""
                 if transcript:
-                    ok = add_to_sheet(v["name"], transcript)
+                    ok = add_to_sheet(v["name"], transcript, v.get("speaker", ""), v.get("footer", ""))
                     if not ok:
                         v["status"] = "sheet error"
                         st.error(f"Failed to add {v['name']} to sheet.")

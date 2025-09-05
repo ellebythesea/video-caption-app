@@ -20,6 +20,7 @@ HEADERS = [
     "Timestamp",
     "Filename",
     "Transcript",
+    "Footer",
     "Caption",
     "Error",
 ]
@@ -92,16 +93,19 @@ def setup_sheet_headers():
         return False
 
 
-def add_to_sheet(filename, transcript, prompt: str = ""):
+def add_to_sheet(filename, transcript, speaker: str = "", footer: str = ""):
     """Append a new row starting at column A.
 
-    The `prompt` parameter is accepted for backward compatibility but ignored,
-    since the sheet no longer tracks a Prompt column.
+    Stores Transcript as "[speaker] [transcript]" when a speaker is provided,
+    and saves `footer` in its own column for later concatenation with Caption.
     """
     try:
         ws = _get_worksheet()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = [timestamp, filename, transcript or "", "", ""]
+        transcript_text = transcript or ""
+        if speaker:
+            transcript_text = f"{speaker} {transcript_text}".strip()
+        row = [timestamp, filename, transcript_text, footer or "", "", ""]
         # Force appends to start from column A of the table
         ws.append_row(row, value_input_option="RAW", table_range="A1")
         return True
@@ -126,7 +130,7 @@ def process_sheet_rows(process_caption_fn):
     # Map header indexes
     header = values[0]
     index = {name: i for i, name in enumerate(header)}
-    required = ["Transcript", "Caption", "Error"]
+    required = ["Transcript", "Footer", "Caption", "Error"]
     if not all(col in index for col in required):
         # Attempt to repair headers
         setup_sheet_headers()
@@ -138,6 +142,7 @@ def process_sheet_rows(process_caption_fn):
     for r, row in enumerate(values[1:], start=2):
         try:
             transcript = row[index.get("Transcript", 0)] if len(row) > index.get("Transcript", 0) else ""
+            footer = row[index.get("Footer", 0)] if len(row) > index.get("Footer", 0) else ""
             caption_existing = row[index.get("Caption", 0)] if len(row) > index.get("Caption", 0) else ""
 
             if not transcript:
@@ -146,14 +151,15 @@ def process_sheet_rows(process_caption_fn):
             if caption_existing:
                 continue
 
-            # Generate caption (no prompt stored in sheet)
-            caption = process_caption_fn(transcript, "")
+            # Generate caption and append footer in the same cell
+            base_caption = process_caption_fn(transcript, "")
+            final_caption = f"{base_caption}\n\n{footer}" if footer else base_caption
 
             # Write back results
-            ws.update_cell(r, index.get("Caption", 3) + 1, caption)
+            ws.update_cell(r, index.get("Caption", 4) + 1, final_caption)
         except Exception as e:
             log_message(f"Error processing row {r}: {e}")
             try:
-                ws.update_cell(r, index.get("Error", 4) + 1, str(e))
+                ws.update_cell(r, index.get("Error", 5) + 1, str(e))
             except Exception:
                 pass
