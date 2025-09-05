@@ -1,14 +1,25 @@
-# gsheet.py
+import os
+import base64
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from config import GOOGLE_SHEET_ID
 from logger import log_message
-import os
+from datetime import datetime
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-script_dir = os.path.dirname(os.path.abspath(__file__))
-cred_path = os.path.join(script_dir, "credentials.json")
+
+# Decode credentials from base64 environment variable
+cred_content = base64.b64decode(os.getenv("GOOGLE_CREDENTIALS_BASE64"))
+cred_path = "credentials.json"  # Temporary file
+with open(cred_path, "wb") as f:
+    f.write(cred_content)
 creds = ServiceAccountCredentials.from_json_keyfile_name(cred_path, scope)
+# Optional: Clean up the temporary file
+try:
+    os.remove(cred_path)
+except Exception as e:
+    log_message(f"Error removing temporary credentials file: {str(e)}")
+
 client = gspread.authorize(creds)
 sheet = client.open_by_key(GOOGLE_SHEET_ID)
 log_worksheet = sheet.worksheet("IGCaptionLog")
@@ -48,3 +59,14 @@ def process_sheet_rows(process_func):
             log_message(f"Successfully updated row {row_idx}")
     except Exception as e:
         log_message(f"Error accessing sheet: {str(e)}")
+
+def add_to_sheet(file_name, transcript, prompt=""):
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"Attempting to add: {timestamp}, {file_name}, {transcript[:50]}...")  # Debug print
+        log_worksheet.append_row([timestamp, file_name, transcript, prompt, ""])
+        log_message(f"Added new row for {file_name}")
+        return True
+    except Exception as e:
+        log_message(f"Error adding to sheet: {str(e)}")
+        return False

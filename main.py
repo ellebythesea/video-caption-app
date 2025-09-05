@@ -1,4 +1,3 @@
-# main.py (for local script running if needed)
 import time
 from config import GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY
 from logger import log_message

@@ -1,4 +1,3 @@
-# news.py
 import requests
 from collections import Counter
 from logger import log_message

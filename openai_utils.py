@@ -1,4 +1,3 @@
-# openai_utils.py
 import openai
 from config import OPENAI_API_KEY
 from logger import log_message
