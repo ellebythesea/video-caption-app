@@ -48,8 +48,8 @@ def _check_password():
 
     # Check for a valid one-day token in URL query params
     try:
-        params = st.experimental_get_query_params() or {}
-        token = (params.get("auth") or [None])[0]
+        params = getattr(st, "query_params", {}) or {}
+        token = params.get("auth")
         if token and _verify_token(token, expected):
             st.session_state["authenticated"] = True
             return True
@@ -65,7 +65,11 @@ def _check_password():
             # Also persist unlock for the rest of the day via a signed query token
             try:
                 token = _today_token(expected)
-                st.experimental_set_query_params(auth=token)
+                # New API (Streamlit >= 1.30)
+                try:
+                    st.query_params["auth"] = token
+                except Exception:
+                    st.experimental_set_query_params(auth=token)
             except Exception:
                 pass
             # Streamlit >= 1.30 uses st.rerun(); older versions used experimental_rerun
