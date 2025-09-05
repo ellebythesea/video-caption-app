@@ -47,23 +47,23 @@ def _check_password():
 st.set_page_config(layout="wide")
 st.title("Video Caption Generator")
 
-# Force a 4-across grid on narrow screens and shrink previews
+# Force a 3-across grid on narrow screens and shrink image previews
 st.markdown(
     """
     <style>
-      /* Keep 4 columns even on mobile */
+      /* Keep 3 columns even on mobile */
       @media (max-width: 900px) {
         div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-          width: 25% !important;
-          flex: 0 0 25% !important;
+          width: 33.3333% !important;
+          flex: 0 0 33.3333% !important;
           padding-left: 0.25rem;
           padding-right: 0.25rem;
         }
-        /* Make embedded video players small for grid previews */
-        div[data-testid="column"] iframe,
-        div[data-testid="column"] video {
+        /* Make images compact for grid previews */
+        div[data-testid="column"] img {
           width: 100% !important;
-          height: 180px !important;
+          height: 160px !important;
+          object-fit: cover;
         }
       }
     </style>
@@ -95,40 +95,99 @@ if uploaded_files:
             continue
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uf.name)[1]) as tmp_file:
             tmp_file.write(uf.getvalue())
-            st.session_state["uploaded_videos"].append({"name": uf.name, "path": tmp_file.name})
+            st.session_state["uploaded_videos"].append({
+                "name": uf.name,
+                "path": tmp_file.name,
+                "thumb_path": None,
+                "status": "queued",
+            })
 
 videos = st.session_state.get("uploaded_videos", [])
 
 if videos:
-    st.caption("Preview (4 across)")
-    cols = st.columns(4)
-    for i, v in enumerate(videos):
-        col = cols[i % 4]
-        with col:
-            st.video(v["path"])
-            st.text(v["name"][:40])
+    # Ensure thumbnails exist for display
+    for v in videos:
+        if not v.get("thumb_path"):
+            try:
+                import cv2  # type: ignore
+                cap = cv2.VideoCapture(v["path"])
+                if cap.isOpened():
+                    frame_count = int(max(cap.get(cv2.CAP_PROP_FRAME_COUNT), 1))
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count // 2)
+                    ok, frame = cap.read()
+                    if not ok:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ok, frame = cap.read()
+                    cap.release()
+                    if ok:
+                        ok2, buf = cv2.imencode('.jpg', frame)
+                        if ok2:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as imgf:
+                                imgf.write(buf.tobytes())
+                                v["thumb_path"] = imgf.name
+            except Exception:
+                pass
 
-    if st.button("Transcribe and Add All"):
+    st.caption("Queued files (3 across previews)")
+    cols = st.columns(3)
+    for i, v in enumerate(videos):
+        col = cols[i % 3]
+        with col:
+            if v.get("thumb_path") and os.path.exists(v["thumb_path"]):
+                st.image(v["thumb_path"], use_column_width=True)
+            else:
+                st.write("[no preview]")
+            st.text(v["name"][:60])
+            st.caption(f"Status: {v.get('status', 'queued').capitalize()}")
+
+    c1, c2 = st.columns([1,1])
+    clear_clicked = c2.button("Clear queued list")
+    process_clicked = c1.button("Transcribe and Add All")
+    if clear_clicked:
+        for v in videos:
+            for p in (v.get("path"), v.get("thumb_path")):
+                try:
+                    if p and os.path.exists(p):
+                        os.unlink(p)
+                except Exception:
+                    pass
+        st.session_state["uploaded_videos"] = []
+        try:
+            st.rerun()
+        except Exception:
+            pass
+
+    if process_clicked:
         progress = st.progress(0)
         completed = 0
         for v in videos:
             with st.spinner(f"Transcribing {v['name']}..."):
+                v["status"] = "transcribing"
                 transcript = transcribe_video(v["path"]) or ""
                 if transcript:
                     ok = add_to_sheet(v["name"], transcript)
                     if not ok:
+                        v["status"] = "sheet error"
                         st.error(f"Failed to add {v['name']} to sheet.")
+                    else:
+                        v["status"] = "transcribed"
                 else:
+                    v["status"] = "failed"
                     st.error(f"Transcription failed for {v['name']}")
-                # Clean up temp file for this video
                 try:
                     os.unlink(v["path"])
                 except Exception:
                     pass
             completed += 1
             progress.progress(int(completed / max(len(videos), 1) * 100))
-        st.session_state["uploaded_videos"] = []
         st.success("All uploaded videos processed.")
+        try:
+            st.rerun()
+        except Exception:
+            try:
+                st.experimental_rerun()
+            except Exception:
+                pass
 
 if st.button("Generate Captions for Pending Rows"):
     with st.spinner("Processing sheet..."):
