@@ -1,5 +1,4 @@
 import os
-import base64
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from config import GOOGLE_SHEET_ID
@@ -8,17 +7,9 @@ from datetime import datetime
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# Decode credentials from base64 environment variable
-cred_content = base64.b64decode(os.getenv("GOOGLE_CREDENTIALS_BASE64"))
-cred_path = "credentials.json"  # Temporary file
-with open(cred_path, "wb") as f:
-    f.write(cred_content)
+# Use the local credentials.json file directly
+cred_path = os.path.join(os.path.dirname(__file__), "credentials.json")
 creds = ServiceAccountCredentials.from_json_keyfile_name(cred_path, scope)
-# Optional: Clean up the temporary file
-try:
-    os.remove(cred_path)
-except Exception as e:
-    log_message(f"Error removing temporary credentials file: {str(e)}")
 
 client = gspread.authorize(creds)
 sheet = client.open_by_key(GOOGLE_SHEET_ID)
@@ -27,7 +18,7 @@ log_worksheet = sheet.worksheet("IGCaptionLog")
 def setup_sheet_headers():
     try:
         first_row = log_worksheet.row_values(1)
-        expected_headers = ["Timestamp", "File Name", "Transcript", "Prompt", "ChatGPT Result"]  # Updated 'File Path' to 'File Name' for uploads
+        expected_headers = ["Timestamp", "File Name", "Transcript", "Prompt", "ChatGPT Result"]
         if len(first_row) < 5 or first_row != expected_headers:
             log_worksheet.update('A1:E1', [expected_headers])
             log_message("Updated sheet headers")
@@ -37,6 +28,7 @@ def setup_sheet_headers():
 def add_to_sheet(file_name, transcript, prompt=""):
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"Attempting to add: {timestamp}, {file_name}, {transcript[:50]}...")  # Debug print
         log_worksheet.append_row([timestamp, file_name, transcript, prompt, ""])
         log_message(f"Added new row for {file_name}")
         return True
@@ -59,14 +51,3 @@ def process_sheet_rows(process_func):
             log_message(f"Successfully updated row {row_idx}")
     except Exception as e:
         log_message(f"Error accessing sheet: {str(e)}")
-
-def add_to_sheet(file_name, transcript, prompt=""):
-    try:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"Attempting to add: {timestamp}, {file_name}, {transcript[:50]}...")  # Debug print
-        log_worksheet.append_row([timestamp, file_name, transcript, prompt, ""])
-        log_message(f"Added new row for {file_name}")
-        return True
-    except Exception as e:
-        log_message(f"Error adding to sheet: {str(e)}")
-        return False
