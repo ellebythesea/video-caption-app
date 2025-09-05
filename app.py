@@ -1,6 +1,10 @@
 import streamlit as st
 import tempfile
 import os
+import hmac
+import hashlib
+import base64
+from datetime import date
 from config import GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY, APP_PASSWORD
 from logger import log_message
 from gsheet import setup_sheet_headers, add_to_sheet, process_sheet_rows
@@ -9,6 +13,21 @@ from openai_utils import transcribe_video, process_caption
 if not all([GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY]):
     st.error("Missing required environment variables! Set them in .env or Streamlit secrets.")
     st.stop()
+
+def _today_token(secret: str) -> str:
+    """Return a URL-safe token valid for today's date using HMAC-SHA256."""
+    today = date.today().isoformat()
+    digest = hmac.new(secret.encode("utf-8"), today.encode("utf-8"), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
+
+
+def _verify_token(token: str, secret: str) -> bool:
+    try:
+        expected = _today_token(secret)
+        return hmac.compare_digest(token or "", expected)
+    except Exception:
+        return False
+
 
 def _check_password():
     """Gate the app behind a one-per-session password.
@@ -26,12 +45,29 @@ def _check_password():
     if not expected:
         st.warning("Admin has not configured APP_PASSWORD. Uploads are disabled.")
         return False
+
+    # Check for a valid one-day token in URL query params
+    try:
+        params = st.experimental_get_query_params() or {}
+        token = (params.get("auth") or [None])[0]
+        if token and _verify_token(token, expected):
+            st.session_state["authenticated"] = True
+            return True
+    except Exception:
+        pass
+
     st.subheader("Enter Password")
     pwd = st.text_input("Password", type="password")
     if st.button("Unlock"):
         if expected and pwd == expected:
             st.session_state["authenticated"] = True
             st.success("Unlocked for this session.")
+            # Also persist unlock for the rest of the day via a signed query token
+            try:
+                token = _today_token(expected)
+                st.experimental_set_query_params(auth=token)
+            except Exception:
+                pass
             # Streamlit >= 1.30 uses st.rerun(); older versions used experimental_rerun
             try:
                 st.rerun()
@@ -88,6 +124,8 @@ uploaded_files = st.file_uploader(
 if "uploaded_videos" not in st.session_state:
     st.session_state["uploaded_videos"] = []  # list of {name, path}
 
+MAX_TRANSCRIBE_MB = 25.0
+
 if uploaded_files:
     existing = {v["name"] for v in st.session_state["uploaded_videos"]}
     for uf in uploaded_files:
@@ -95,11 +133,13 @@ if uploaded_files:
             continue
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uf.name)[1]) as tmp_file:
             tmp_file.write(uf.getvalue())
+            size_bytes = os.path.getsize(tmp_file.name)
             st.session_state["uploaded_videos"].append({
                 "name": uf.name,
                 "path": tmp_file.name,
                 "thumb_path": None,
                 "status": "queued",
+                "size_mb": round(size_bytes / (1024 * 1024), 2),
             })
 
 videos = st.session_state.get("uploaded_videos", [])
@@ -141,6 +181,11 @@ if videos:
                     st.write("[no preview]")
                 st.text(v["name"][:60])
                 st.caption(f"Status: {v.get('status', 'queued').capitalize()}")
+                size = v.get("size_mb")
+                if size is not None:
+                    st.caption(f"Size: {size:.2f} MB")
+                    if size > MAX_TRANSCRIBE_MB:
+                        st.markdown("<span style='color:#cc0000'>Exceeds 25 MB limit; will be skipped.</span>", unsafe_allow_html=True)
 
     c1, c2 = st.columns([1,1])
     clear_clicked = c2.button("Clear queued list")
@@ -162,8 +207,15 @@ if videos:
     if process_clicked:
         progress = st.progress(0)
         completed = 0
+        skipped = 0
         for v in videos:
             with st.spinner(f"Transcribing {v['name']}..."):
+                # Guard for size limit
+                if v.get("size_mb", 0) > MAX_TRANSCRIBE_MB:
+                    v["status"] = "too large"
+                    skipped += 1
+                    continue
+
                 v["status"] = "transcribing"
                 transcript = transcribe_video(v["path"]) or ""
                 if transcript:
@@ -182,6 +234,8 @@ if videos:
                     pass
             completed += 1
             progress.progress(int(completed / max(len(videos), 1) * 100))
+        if skipped:
+            st.warning(f"{skipped} file(s) skipped for exceeding the 25 MB limit.")
         st.success("All uploaded videos processed.")
         try:
             st.rerun()
