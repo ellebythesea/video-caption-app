@@ -108,9 +108,32 @@ def add_to_sheet(filename, transcript, speaker: str = "", footer: str = ""):
         row = [timestamp, filename, transcript_text, footer or "", "", ""]
         # Force appends to start from column A of the table
         ws.append_row(row, value_input_option="RAW", table_range="A1")
-        return True
+        # Return the 1-based row index of the appended row
+        last_row = len(ws.get_all_values())
+        return last_row
     except Exception as e:
         log_message(f"Error adding to sheet: {e}")
+        return None
+
+
+def update_caption_row(row_index: int, caption_text: str):
+    """Write caption_text into the Caption column for the given 1-based row."""
+    try:
+        ws = _get_worksheet()
+        # Ensure headers mapping; Caption is the 5th column in HEADERS (1-based index 5)
+        # But in case of header drift, calculate dynamically
+        header = ws.row_values(1)
+        try:
+            col_idx = header.index("Caption") + 1
+        except ValueError:
+            # Repair headers and try again
+            setup_sheet_headers()
+            header = ws.row_values(1)
+            col_idx = header.index("Caption") + 1
+        ws.update_cell(row_index, col_idx, caption_text)
+        return True
+    except Exception as e:
+        log_message(f"Error updating caption for row {row_index}: {e}")
         return False
 
 

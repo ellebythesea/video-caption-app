@@ -7,7 +7,7 @@ import base64
 from datetime import date
 from config import GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY, APP_PASSWORD
 from logger import log_message
-from gsheet import setup_sheet_headers, add_to_sheet, process_sheet_rows
+from gsheet import setup_sheet_headers, add_to_sheet, process_sheet_rows, update_caption_row
 from openai_utils import transcribe_video, process_caption
 
 if not all([GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY]):
@@ -230,12 +230,22 @@ if videos:
                 v["status"] = "transcribing"
                 transcript = transcribe_video(v["path"]) or ""
                 if transcript:
-                    ok = add_to_sheet(v["name"], transcript, v.get("speaker", ""), v.get("footer", ""))
-                    if not ok:
+                    row_idx = add_to_sheet(v["name"], transcript, v.get("speaker", ""), v.get("footer", ""))
+                    if not row_idx:
                         v["status"] = "sheet error"
                         st.error(f"Failed to add {v['name']} to sheet.")
                     else:
-                        v["status"] = "transcribed"
+                        try:
+                            combined_transcript = (v.get("speaker", "") + " " + transcript).strip() if v.get("speaker") else transcript
+                            base_caption = process_caption(combined_transcript, "")
+                            final_caption = base_caption + ("\n\n" + v.get("footer", "") if v.get("footer") else "")
+                            if update_caption_row(int(row_idx), final_caption):
+                                v["status"] = "captioned"
+                            else:
+                                v["status"] = "sheet error"
+                        except Exception:
+                            v["status"] = "caption error"
+                            st.error(f"Failed to generate caption for {v['name']}")
                 else:
                     v["status"] = "failed"
                     st.error(f"Transcription failed for {v['name']}")
@@ -256,7 +266,4 @@ if videos:
             except Exception:
                 pass
 
-if st.button("Generate Captions for Pending Rows"):
-    with st.spinner("Processing sheet..."):
-        process_sheet_rows(process_caption)
-    st.success("Processed all pending rows in the sheet!")
+# Removed the separate caption generation step; captions are generated immediately after upload/transcription.
