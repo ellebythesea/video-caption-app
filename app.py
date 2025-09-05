@@ -44,6 +44,7 @@ def _check_password():
             st.error("Incorrect password.")
     return False
 
+st.set_page_config(layout="wide")
 st.title("Video Caption Generator")
 
 # Require password before showing the uploader/actions
@@ -53,26 +54,57 @@ if not _check_password():
 # Initialize sheet after auth so we don't touch APIs while locked
 setup_sheet_headers()
 
-uploaded_file = st.file_uploader("Upload a video from your phone", type=["mp4", "mov", "avi"])
+uploaded_files = st.file_uploader(
+    "Upload one or more videos from your phone",
+    type=["mp4", "mov", "avi"],
+    accept_multiple_files=True,
+)
 
-if uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        video_path = tmp_file.name
+# Keep temporary files across reruns for a single session
+if "uploaded_videos" not in st.session_state:
+    st.session_state["uploaded_videos"] = []  # list of {name, path}
 
-    st.video(video_path)
+if uploaded_files:
+    existing = {v["name"] for v in st.session_state["uploaded_videos"]}
+    for uf in uploaded_files:
+        if uf.name in existing:
+            continue
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uf.name)[1]) as tmp_file:
+            tmp_file.write(uf.getvalue())
+            st.session_state["uploaded_videos"].append({"name": uf.name, "path": tmp_file.name})
 
-    if st.button("Transcribe and Add to Sheet"):
-        with st.spinner("Transcribing video..."):
-            transcript = transcribe_video(video_path)
-            if transcript:
-                if add_to_sheet(uploaded_file.name, transcript):
-                    st.success(f"Added {uploaded_file.name} to Google Sheet!")
+videos = st.session_state.get("uploaded_videos", [])
+
+if videos:
+    st.caption("Preview (4 across)")
+    cols = st.columns(4)
+    for i, v in enumerate(videos):
+        col = cols[i % 4]
+        with col:
+            st.video(v["path"])
+            st.text(v["name"][:40])
+
+    if st.button("Transcribe and Add All"):
+        progress = st.progress(0)
+        completed = 0
+        for v in videos:
+            with st.spinner(f"Transcribing {v['name']}..."):
+                transcript = transcribe_video(v["path"]) or ""
+                if transcript:
+                    ok = add_to_sheet(v["name"], transcript)
+                    if not ok:
+                        st.error(f"Failed to add {v['name']} to sheet.")
                 else:
-                    st.error("Failed to add to sheet.")
-            else:
-                st.error("Transcription failed.")
-        os.unlink(video_path)
+                    st.error(f"Transcription failed for {v['name']}")
+                # Clean up temp file for this video
+                try:
+                    os.unlink(v["path"])
+                except Exception:
+                    pass
+            completed += 1
+            progress.progress(int(completed / max(len(videos), 1) * 100))
+        st.session_state["uploaded_videos"] = []
+        st.success("All uploaded videos processed.")
 
 if st.button("Generate Captions for Pending Rows"):
     with st.spinner("Processing sheet..."):
