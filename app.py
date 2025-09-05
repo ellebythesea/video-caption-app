@@ -129,16 +129,18 @@ if videos:
                 pass
 
     st.caption("Queued files (3 across previews)")
-    cols = st.columns(3)
-    for i, v in enumerate(videos):
-        col = cols[i % 3]
-        with col:
-            if v.get("thumb_path") and os.path.exists(v["thumb_path"]):
-                st.image(v["thumb_path"], use_column_width=True)
-            else:
-                st.write("[no preview]")
-            st.text(v["name"][:60])
-            st.caption(f"Status: {v.get('status', 'queued').capitalize()}")
+    # Render a true 3-across grid by chunking into rows
+    for start in range(0, len(videos), 3):
+        row_items = videos[start:start+3]
+        cols = st.columns(3)
+        for idx, v in enumerate(row_items):
+            with cols[idx]:
+                if v.get("thumb_path") and os.path.exists(v["thumb_path"]):
+                    st.image(v["thumb_path"], use_container_width=True)
+                else:
+                    st.write("[no preview]")
+                st.text(v["name"][:60])
+                st.caption(f"Status: {v.get('status', 'queued').capitalize()}")
 
     c1, c2 = st.columns([1,1])
     clear_clicked = c2.button("Clear queued list")
