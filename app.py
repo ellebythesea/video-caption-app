@@ -32,18 +32,26 @@ def _check_password():
         if expected and pwd == expected:
             st.session_state["authenticated"] = True
             st.success("Unlocked for this session.")
-            st.experimental_rerun()
+            # Streamlit >= 1.30 uses st.rerun(); older versions used experimental_rerun
+            try:
+                st.rerun()
+            except Exception:
+                try:
+                    st.experimental_rerun()
+                except Exception:
+                    pass
         else:
             st.error("Incorrect password.")
     return False
-
-setup_sheet_headers()
 
 st.title("Video Caption Generator")
 
 # Require password before showing the uploader/actions
 if not _check_password():
     st.stop()
+
+# Initialize sheet after auth so we don't touch APIs while locked
+setup_sheet_headers()
 
 uploaded_file = st.file_uploader("Upload a video from your phone", type=["mp4", "mov", "avi"])
 
