@@ -47,6 +47,30 @@ def _check_password():
 st.set_page_config(layout="wide")
 st.title("Video Caption Generator")
 
+# Force a 4-across grid on narrow screens and shrink previews
+st.markdown(
+    """
+    <style>
+      /* Keep 4 columns even on mobile */
+      @media (max-width: 900px) {
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+          width: 25% !important;
+          flex: 0 0 25% !important;
+          padding-left: 0.25rem;
+          padding-right: 0.25rem;
+        }
+        /* Make embedded video players small for grid previews */
+        div[data-testid="column"] iframe,
+        div[data-testid="column"] video {
+          width: 100% !important;
+          height: 180px !important;
+        }
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Require password before showing the uploader/actions
 if not _check_password():
     st.stop()
