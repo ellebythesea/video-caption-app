@@ -20,8 +20,6 @@ HEADERS = [
     "Timestamp",
     "Filename",
     "Transcript",
-    "Prompt",
-    "Status",
     "Caption",
     "Error",
 ]
@@ -85,22 +83,27 @@ def setup_sheet_headers():
         ws = _get_worksheet()
         existing = ws.row_values(1)
         if existing != HEADERS:
-            # Resize and set headers
+            # Ensure headers are written starting at column A
             ws.resize(rows=1000, cols=len(HEADERS))
-            ws.update("1:1", [HEADERS])
+            ws.update("A1", [HEADERS])
         return True
     except Exception as e:
         log_message(f"Error setting up sheet headers: {e}")
         return False
 
 
-def add_to_sheet(filename, transcript, prompt=""):
-    """Append a new row with status 'pending'."""
+def add_to_sheet(filename, transcript, prompt: str = ""):
+    """Append a new row starting at column A.
+
+    The `prompt` parameter is accepted for backward compatibility but ignored,
+    since the sheet no longer tracks a Prompt column.
+    """
     try:
         ws = _get_worksheet()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = [timestamp, filename, transcript or "", prompt or "", "pending", "", ""]
-        ws.append_row(row, value_input_option="RAW")
+        row = [timestamp, filename, transcript or "", "", ""]
+        # Force appends to start from column A of the table
+        ws.append_row(row, value_input_option="RAW", table_range="A1")
         return True
     except Exception as e:
         log_message(f"Error adding to sheet: {e}")
@@ -123,7 +126,7 @@ def process_sheet_rows(process_caption_fn):
     # Map header indexes
     header = values[0]
     index = {name: i for i, name in enumerate(header)}
-    required = ["Transcript", "Prompt", "Status", "Caption", "Error"]
+    required = ["Transcript", "Caption", "Error"]
     if not all(col in index for col in required):
         # Attempt to repair headers
         setup_sheet_headers()
@@ -134,25 +137,23 @@ def process_sheet_rows(process_caption_fn):
     # Iterate rows (1-based in Sheets; skip header which is row 1)
     for r, row in enumerate(values[1:], start=2):
         try:
-            status = row[index.get("Status", 0)] if len(row) > index.get("Status", 0) else ""
             transcript = row[index.get("Transcript", 0)] if len(row) > index.get("Transcript", 0) else ""
-            prompt = row[index.get("Prompt", 0)] if len(row) > index.get("Prompt", 0) else ""
+            caption_existing = row[index.get("Caption", 0)] if len(row) > index.get("Caption", 0) else ""
 
             if not transcript:
                 continue
-            if status and status.lower() not in ("", "pending"):
+            # Pending if caption is blank
+            if caption_existing:
                 continue
 
-            # Generate caption
-            caption = process_caption_fn(transcript, prompt)
+            # Generate caption (no prompt stored in sheet)
+            caption = process_caption_fn(transcript, "")
 
             # Write back results
-            ws.update_cell(r, index.get("Caption", 5) + 1, caption)
-            ws.update_cell(r, index.get("Status", 4) + 1, "done")
+            ws.update_cell(r, index.get("Caption", 3) + 1, caption)
         except Exception as e:
             log_message(f"Error processing row {r}: {e}")
             try:
-                ws.update_cell(r, index.get("Error", 6) + 1, str(e))
-                ws.update_cell(r, index.get("Status", 4) + 1, "error")
+                ws.update_cell(r, index.get("Error", 4) + 1, str(e))
             except Exception:
                 pass

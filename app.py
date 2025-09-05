@@ -27,8 +27,7 @@ if uploaded_file:
         with st.spinner("Transcribing video..."):
             transcript = transcribe_video(video_path)
             if transcript:
-                prompt = st.text_input("Optional Prompt", "")
-                if add_to_sheet(uploaded_file.name, transcript, prompt):
+                if add_to_sheet(uploaded_file.name, transcript):
                     st.success(f"Added {uploaded_file.name} to Google Sheet!")
                 else:
                     st.error("Failed to add to sheet.")
