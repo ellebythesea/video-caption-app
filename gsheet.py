@@ -191,6 +191,34 @@ def update_caption_row(row_index: int, caption_text: str):
         return False
 
 
+def get_transcript_row(row_index: int) -> str | None:
+    """Return the Transcript text for the given 1-based row, or None on error."""
+    try:
+        ws = _get_worksheet()
+        header_row = _ensure_headers_and_get_row(ws)
+        header = ws.row_values(header_row)
+        col_idx = header.index("Transcript") + 1
+        val = ws.cell(row_index, col_idx).value
+        return val or ""
+    except Exception as e:
+        log_message(f"Error reading transcript for row {row_index}: {e}")
+        return None
+
+
+def update_transcript_row(row_index: int, transcript_text: str) -> bool:
+    """Write transcript_text into the Transcript column for the given 1-based row."""
+    try:
+        ws = _get_worksheet()
+        header_row = _ensure_headers_and_get_row(ws)
+        header = ws.row_values(header_row)
+        col_idx = header.index("Transcript") + 1
+        ws.update_cell(row_index, col_idx, transcript_text)
+        return True
+    except Exception as e:
+        log_message(f"Error updating transcript for row {row_index}: {e}")
+        return False
+
+
 def process_sheet_rows(process_caption_fn):
     """Process rows with Status 'pending' by generating captions.
 
