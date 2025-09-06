@@ -110,12 +110,13 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
         SYS_PROMPT = (
             "You are a sharp political analyst. Rewrite the transcript into a short, clear social post "
             "under 1300 characters. Use 1–2 simple paragraphs. Prefer direct quotes and concrete facts "
-            "(names, dates, numbers) drawn only from the transcript and provided news context. Verify "
-            "names and quotes carefully. End with 8–13 relevant hashtags. Do not add interpretations, "
-            "opinions, calls to action, rhetoric, or generalized conclusions (e.g., avoid phrases like "
-            "'this shows', 'the call to action', 'spirit of', 'reminds us'). Omit any detail that cannot "
-            "be supported by the transcript or news context. Keep a neutral, third‑person tone. Avoid "
-            "links, flourish, or any mention of Trump’s current office status."
+            "(names, dates, locations, numbers) drawn only from the transcript and provided news context. "
+            "Verify names and quotes carefully. End with 8–13 relevant hashtags. Do not add interpretations, "
+            "opinions, calls to action, rhetoric, or generalized conclusions (e.g., avoid phrases like 'this shows', "
+            "'the message is clear', 'the call to action', 'spirit of', 'reminds us', 'resistance', 'unity and defiance'). "
+            "Omit any statement that cannot be directly supported by the transcript or news context. Keep a neutral, "
+            "third‑person tone. Do not summarize 'what this means'—only state what was said or done. Avoid links, flourish, "
+            "or any mention of Trump’s current office status."
         )
         # Optionally allow an extra hint without polluting the user message
         if prompt:
@@ -159,24 +160,48 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
             """
             subjective_cues = [
                 "the message is clear",
+                "message is clear",
                 "call to action",
+                "calls for",
                 "this shows",
                 "this demonstrates",
                 "highlights",
-                "signal of",
+                "reflects",
+                "broader movement",
+                "perceived",
+                "need for",
+                "emphasizing the power",
+                "power of unity",
                 "spirit of",
                 "reminds us",
                 "not invincible",
                 "can challenge",
                 "resistance",
+                "unity and defiance",
                 "unity and",
                 "unity can",
                 "rhetoric",
                 "misuse of power",
                 "political maneuvers",
                 "the takeaway",
+                "crucial in overcoming",
+                "overcoming challenges",
+                "maintaining democratic integrity",
+                "powerful figures",
+                "exploit systemic",
+                "systemic weaknesses",
+                "coalition reflects",
+                "counteract abuses",
+                "aggression in legal",
+                "the landscape evolves",
                 "clear:",
             ]
+
+            # Helper to detect likely factual sentences with named entities
+            state_or_org_terms = {
+                "California", "Oregon", "Washington", "Capitol", "DOJ", "CDC", "FDA", "WHO",
+                "Alliance", "Court", "Senate", "House", "White House", "Dept.", "Department",
+            }
 
             def is_hashtag_paragraph(p: str) -> bool:
                 count = sum(1 for t in p.split() if t.startswith("#"))
@@ -217,6 +242,16 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
                         or '’' in sent_norm
                         or re.search(r"\d{4}|\d+", sent_norm)
                     ):
+                        kept.append(sent_norm)
+                        continue
+                    # Keep if it appears to reference named entities (>=2 capitalized tokens beyond first)
+                    caps = re.findall(r"\b[A-Z][a-zA-Z]+\b", sent_norm)
+                    # Exclude the first token (often sentence start)
+                    if len(caps) >= 2:
+                        kept.append(sent_norm)
+                        continue
+                    # Keep if contains known state/org terms
+                    if any(t in sent_norm for t in state_or_org_terms):
                         kept.append(sent_norm)
                         continue
                     # Otherwise, be conservative and drop
