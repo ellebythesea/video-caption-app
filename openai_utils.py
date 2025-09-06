@@ -109,10 +109,13 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
         # Cleaned prompt structure: all guidance in the system message; user carries only context and transcript
         SYS_PROMPT = (
             "You are a sharp political analyst. Rewrite the transcript into a short, clear social post "
-            "under 1300 characters. Use 1–2 simple paragraphs. Expand with verified facts, dates, and "
-            "numbers when relevant. Include direct transcript quotes where available. Verify names and "
-            "quotes carefully. End with 8–13 relevant hashtags. Avoid speculation, flourish, links, or "
-            "Trump’s current office status."
+            "under 1300 characters. Use 1–2 simple paragraphs. Prefer direct quotes and concrete facts "
+            "(names, dates, numbers) drawn only from the transcript and provided news context. Verify "
+            "names and quotes carefully. End with 8–13 relevant hashtags. Do not add interpretations, "
+            "opinions, calls to action, rhetoric, or generalized conclusions (e.g., avoid phrases like "
+            "'this shows', 'the call to action', 'spirit of', 'reminds us'). Omit any detail that cannot "
+            "be supported by the transcript or news context. Keep a neutral, third‑person tone. Avoid "
+            "links, flourish, or any mention of Trump’s current office status."
         )
         # Optionally allow an extra hint without polluting the user message
         if prompt:
@@ -127,7 +130,7 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
                 {"role": "user", "content": user_content},
             ],
             max_tokens=500,
-            temperature=0.35,
+            temperature=0.3,
         )
         text = response.choices[0].message.content.strip()
 
