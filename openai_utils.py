@@ -149,7 +149,87 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
                 s = re.sub(pat, repl_president, s)
             return s
 
-        return sanitize_caption(text)
+        def filter_subjective_sentences(s: str) -> str:
+            """Remove subjective/opinionated sentences and keep quotes/facts.
+
+            Heuristics:
+            - Always keep the final hashtag paragraph.
+            - Keep sentences containing direct quotes (", ’…’) or digits/dates.
+            - Drop sentences containing subjective cue phrases.
+            """
+            subjective_cues = [
+                "the message is clear",
+                "call to action",
+                "this shows",
+                "this demonstrates",
+                "highlights",
+                "signal of",
+                "spirit of",
+                "reminds us",
+                "not invincible",
+                "can challenge",
+                "resistance",
+                "unity and",
+                "unity can",
+                "rhetoric",
+                "misuse of power",
+                "political maneuvers",
+                "the takeaway",
+                "clear:",
+            ]
+
+            def is_hashtag_paragraph(p: str) -> bool:
+                count = sum(1 for t in p.split() if t.startswith("#"))
+                return count >= 3 or (count and count >= max(1, len(p.split()) // 3))
+
+            paragraphs = [p.strip() for p in s.split("\n\n") if p.strip()]
+            if not paragraphs:
+                return s
+
+            # Identify hashtag paragraph (last one that looks like hashtags)
+            hashtag_idx = None
+            for i in range(len(paragraphs) - 1, -1, -1):
+                if is_hashtag_paragraph(paragraphs[i]):
+                    hashtag_idx = i
+                    break
+
+            cleaned_paragraphs: list[str] = []
+            for i, p in enumerate(paragraphs):
+                if hashtag_idx is not None and i == hashtag_idx:
+                    cleaned_paragraphs.append(p)
+                    continue
+
+                # Split into sentences on punctuation boundaries
+                sentences = re.split(r"(?<=[.!?])\s+", p)
+                kept: list[str] = []
+                for sent in sentences:
+                    sent_norm = sent.strip()
+                    if not sent_norm:
+                        continue
+                    low = sent_norm.lower()
+                    if any(cue in low for cue in subjective_cues):
+                        continue
+                    # Keep if contains a quote or number/date-like token
+                    if (
+                        '"' in sent_norm
+                        or '“' in sent_norm
+                        or '”' in sent_norm
+                        or '’' in sent_norm
+                        or re.search(r"\d{4}|\d+", sent_norm)
+                    ):
+                        kept.append(sent_norm)
+                        continue
+                    # Otherwise, be conservative and drop
+                    continue
+
+                if kept:
+                    cleaned_paragraphs.append(" ".join(kept))
+
+            return "\n\n".join(cleaned_paragraphs).strip() or s
+
+        text = sanitize_caption(text)
+        text = filter_subjective_sentences(text)
+        return text
     except Exception as e:
         log_message(f"Error with ChatGPT API: {str(e)}")
         return f"Error processing with ChatGPT: {str(e)}"
