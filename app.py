@@ -10,6 +10,39 @@ from logger import log_message
 from gsheet import setup_sheet_headers, add_to_sheet, process_sheet_rows, update_caption_row
 from openai_utils import transcribe_video, process_caption
 
+
+def _ffmpeg_thumb(video_path: str) -> str | None:
+    """Try to generate a thumbnail via ffmpeg. Returns image path or None."""
+    try:
+        try:
+            import imageio_ffmpeg  # type: ignore
+
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            ffmpeg = "ffmpeg"
+
+        # Create temp jpg
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as imgf:
+            out_path = imgf.name
+
+        # Seek a bit into the video to avoid black frames; grab 1 frame
+        # Using thumbnail filter for a representative frame if possible
+        cmd = (
+            f'"{ffmpeg}" -y -ss 00:00:01 -i "{video_path}" '
+            f'-frames:v 1 -vf "thumbnail,scale=640:-1" -q:v 4 "{out_path}"'
+        )
+        rc = os.system(cmd)
+        if rc == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+            return out_path
+        # Cleanup on failure
+        try:
+            os.unlink(out_path)
+        except Exception:
+            pass
+        return None
+    except Exception:
+        return None
+
 if not all([GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY]):
     st.error("Missing required environment variables! Set them in .env or Streamlit secrets.")
     st.stop()
@@ -152,25 +185,31 @@ if videos:
     # Ensure thumbnails exist for display
     for v in videos:
         if not v.get("thumb_path"):
-            try:
-                import cv2  # type: ignore
-                cap = cv2.VideoCapture(v["path"])
-                if cap.isOpened():
-                    frame_count = int(max(cap.get(cv2.CAP_PROP_FRAME_COUNT), 1))
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count // 2)
-                    ok, frame = cap.read()
-                    if not ok:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            # First try ffmpeg-based thumbnail for broader codec support
+            thumb = _ffmpeg_thumb(v.get("path", ""))
+            if thumb:
+                v["thumb_path"] = thumb
+            else:
+                # Fallback to OpenCV if ffmpeg path is not available
+                try:
+                    import cv2  # type: ignore
+                    cap = cv2.VideoCapture(v["path"])
+                    if cap.isOpened():
+                        frame_count = int(max(cap.get(cv2.CAP_PROP_FRAME_COUNT), 1))
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count // 2)
                         ok, frame = cap.read()
-                    cap.release()
-                    if ok:
-                        ok2, buf = cv2.imencode('.jpg', frame)
-                        if ok2:
-                            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as imgf:
-                                imgf.write(buf.tobytes())
-                                v["thumb_path"] = imgf.name
-            except Exception:
-                pass
+                        if not ok:
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            ok, frame = cap.read()
+                        cap.release()
+                        if ok:
+                            ok2, buf = cv2.imencode('.jpg', frame)
+                            if ok2:
+                                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as imgf:
+                                    imgf.write(buf.tobytes())
+                                    v["thumb_path"] = imgf.name
+                except Exception:
+                    pass
 
     st.caption("Queued files (3 across previews)")
     # Render a true 3-across grid by chunking into rows
