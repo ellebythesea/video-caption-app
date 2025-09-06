@@ -106,23 +106,28 @@ def transcribe_video(video_path):
 
 def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
     try:
-        # Revert to earlier structure: default prompt text and 0.5 temperature
-        if not prompt:
-            prompt = """
-            You are a sharp political analyst. Analyze the transcript and news context with concise, factual insights, focusing on voter dynamics, political moves, and geopolitical impacts. Start with the main individual’s name and key findings. Use specific examples, names, or events, adding context and details to statements, and avoid vague or invented details. Verify names and quote individuals accurately where possible based on the transcript.
-            Rewrite text into a short social post under 1300 characters. Use 1–2 simple paragraphs, adding verified facts, dates, and numbers to expand the transcript. Include direct quotes from the transcript where available. Include #hashtags for trending terms once (e.g., #Election2025), not at name ends. End with an 8–13 hashtag paragraph, no links or sources. Do not mention Trump’s current office status or include summaries at the end.
-            """
+        # Cleaned prompt structure: all guidance in the system message; user carries only context and transcript
+        SYS_PROMPT = (
+            "You are a sharp political analyst. Rewrite the transcript into a short, clear social post "
+            "under 1300 characters. Use 1–2 simple paragraphs. Expand with verified facts, dates, and "
+            "numbers when relevant. Include direct transcript quotes where available. Verify names and "
+            "quotes carefully. End with 8–13 relevant hashtags. Avoid speculation, flourish, links, or "
+            "Trump’s current office status."
+        )
+        # Optionally allow an extra hint without polluting the user message
+        if prompt:
+            SYS_PROMPT = SYS_PROMPT + " Additional instructions: " + str(prompt).strip()
         if not news_context or news_context.startswith("LATEST NEWS CONTEXT:\nNo recent news") or news_context.startswith("LATEST NEWS CONTEXT:\nUnable"):
             news_context = "LATEST NEWS CONTEXT:\nNo external news context available. Focus solely on the transcript for analysis.\n\n"
-        full_prompt = f"{news_context}TRANSCRIPT:\n{transcript}\n\nTASK:\n{prompt}"
+        user_content = f"{news_context}\n\nTRANSCRIPT:\n{transcript}"
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a sharp political analyst. Rewrite the transcript into a short social post under 1300 characters. Use 1–2 simple paragraphs, adding verified facts, dates, and numbers to expand statements. Include direct quotes from the transcript where available and verify names and quotes against the transcript. End with an 8–13 hashtag paragraph. Avoid flourish, speculation, or Trump’s office status."},
-                {"role": "user", "content": full_prompt},
+                {"role": "system", "content": SYS_PROMPT},
+                {"role": "user", "content": user_content},
             ],
             max_tokens=500,
-            temperature=0.5,
+            temperature=0.35,
         )
         text = response.choices[0].message.content.strip()
 
@@ -141,121 +146,7 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
                 s = re.sub(pat, repl_president, s)
             return s
 
-        def filter_subjective_sentences(s: str) -> str:
-            """Remove subjective/opinionated sentences and keep quotes/facts.
-
-            Heuristics:
-            - Always keep the final hashtag paragraph.
-            - Keep sentences containing direct quotes (", ’…’) or digits/dates.
-            - Drop sentences containing subjective cue phrases.
-            """
-            subjective_cues = [
-                "the message is clear",
-                "message is clear",
-                "call to action",
-                "calls for",
-                "this shows",
-                "this demonstrates",
-                "highlights",
-                "reflects",
-                "broader movement",
-                "perceived",
-                "need for",
-                "emphasizing the power",
-                "power of unity",
-                "spirit of",
-                "reminds us",
-                "not invincible",
-                "can challenge",
-                "resistance",
-                "unity and defiance",
-                "unity and",
-                "unity can",
-                "rhetoric",
-                "misuse of power",
-                "political maneuvers",
-                "the takeaway",
-                "crucial in overcoming",
-                "overcoming challenges",
-                "maintaining democratic integrity",
-                "powerful figures",
-                "exploit systemic",
-                "systemic weaknesses",
-                "coalition reflects",
-                "counteract abuses",
-                "aggression in legal",
-                "the landscape evolves",
-                "clear:",
-            ]
-
-            # Helper to detect likely factual sentences with named entities
-            state_or_org_terms = {
-                "California", "Oregon", "Washington", "Capitol", "DOJ", "CDC", "FDA", "WHO",
-                "Alliance", "Court", "Senate", "House", "White House", "Dept.", "Department",
-            }
-
-            def is_hashtag_paragraph(p: str) -> bool:
-                count = sum(1 for t in p.split() if t.startswith("#"))
-                return count >= 3 or (count and count >= max(1, len(p.split()) // 3))
-
-            paragraphs = [p.strip() for p in s.split("\n\n") if p.strip()]
-            if not paragraphs:
-                return s
-
-            # Identify hashtag paragraph (last one that looks like hashtags)
-            hashtag_idx = None
-            for i in range(len(paragraphs) - 1, -1, -1):
-                if is_hashtag_paragraph(paragraphs[i]):
-                    hashtag_idx = i
-                    break
-
-            cleaned_paragraphs: list[str] = []
-            for i, p in enumerate(paragraphs):
-                if hashtag_idx is not None and i == hashtag_idx:
-                    cleaned_paragraphs.append(p)
-                    continue
-
-                # Split into sentences on punctuation boundaries
-                sentences = re.split(r"(?<=[.!?])\s+", p)
-                kept: list[str] = []
-                for sent in sentences:
-                    sent_norm = sent.strip()
-                    if not sent_norm:
-                        continue
-                    low = sent_norm.lower()
-                    if any(cue in low for cue in subjective_cues):
-                        continue
-                    # Keep if contains a quote or number/date-like token
-                    if (
-                        '"' in sent_norm
-                        or '“' in sent_norm
-                        or '”' in sent_norm
-                        or '’' in sent_norm
-                        or re.search(r"\d{4}|\d+", sent_norm)
-                    ):
-                        kept.append(sent_norm)
-                        continue
-                    # Keep if it appears to reference named entities (>=2 capitalized tokens beyond first)
-                    caps = re.findall(r"\b[A-Z][a-zA-Z]+\b", sent_norm)
-                    # Exclude the first token (often sentence start)
-                    if len(caps) >= 2:
-                        kept.append(sent_norm)
-                        continue
-                    # Keep if contains known state/org terms
-                    if any(t in sent_norm for t in state_or_org_terms):
-                        kept.append(sent_norm)
-                        continue
-                    # Otherwise, be conservative and drop
-                    continue
-
-                if kept:
-                    cleaned_paragraphs.append(" ".join(kept))
-
-            return "\n\n".join(cleaned_paragraphs).strip() or s
-
-        text = sanitize_caption(text)
-        text = filter_subjective_sentences(text)
-        return text
+        return sanitize_caption(text)
     except Exception as e:
         log_message(f"Error with ChatGPT API: {str(e)}")
         return f"Error processing with ChatGPT: {str(e)}"
