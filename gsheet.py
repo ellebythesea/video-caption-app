@@ -140,8 +140,8 @@ def setup_sheet_headers():
 def add_to_sheet(filename, transcript, speaker: str = "", footer: str = ""):
     """Append a new row starting at column A.
 
-    Stores Transcript as "[speaker] [transcript]" when a speaker is provided,
-    and saves `footer` in its own column for later concatenation with Caption.
+    Stores Transcript as "[speaker] [transcript]" when a speaker is provided.
+    Footer column is intentionally left blank (no output).
     """
     try:
         ws = _get_worksheet()
@@ -150,7 +150,8 @@ def add_to_sheet(filename, transcript, speaker: str = "", footer: str = ""):
         transcript_text = transcript or ""
         if speaker:
             transcript_text = f"{speaker} {transcript_text}".strip()
-        row = [timestamp, filename, transcript_text, footer or "", "", ""]
+        # Do not output to the Footer column; leave it blank
+        row = [timestamp, filename, transcript_text, "", "", ""]
         # Anchor appends to the header row's table starting at column A
         ws.append_row(row, value_input_option="RAW", table_range=f"A{header_row}")
         # Return the 1-based row index of the appended row
