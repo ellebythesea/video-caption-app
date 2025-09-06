@@ -106,22 +106,28 @@ def transcribe_video(video_path):
 
 def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
     try:
-        if not prompt:
-            prompt = """
-            You are a sharp political analyst. Analyze the transcript and news context with concise, factual insights, focusing on voter dynamics, political moves, and geopolitical impacts. Start with the main individual’s name and key findings. Use specific examples, names, or events, adding context and details to statements, and avoid vague or invented details. Verify names and quote individuals accurately where possible based on the transcript.
-            Rewrite text into a short social post under 1300 characters. Use 1–2 simple paragraphs, adding verified facts, dates, and numbers to expand the transcript. Include direct quotes from the transcript where available. Include #hashtags for trending terms once (e.g., #Election2025), not at name ends. End with an 8–13 hashtag paragraph, no links or sources. Do not mention Trump’s current office status or include summaries at the end.
-            """
+        # Cleaned prompt structure: all guidance in the system message; user carries only context and transcript
+        SYS_PROMPT = (
+            "You are a sharp political analyst. Rewrite the transcript into a short, clear social post "
+            "under 1300 characters. Use 1–2 simple paragraphs. Expand with verified facts, dates, and "
+            "numbers when relevant. Include direct transcript quotes where available. Verify names and "
+            "quotes carefully. End with 8–13 relevant hashtags. Avoid speculation, flourish, links, or "
+            "Trump’s current office status."
+        )
+        # Optionally allow an extra hint without polluting the user message
+        if prompt:
+            SYS_PROMPT = SYS_PROMPT + " Additional instructions: " + str(prompt).strip()
         if not news_context or news_context.startswith("LATEST NEWS CONTEXT:\nNo recent news") or news_context.startswith("LATEST NEWS CONTEXT:\nUnable"):
             news_context = "LATEST NEWS CONTEXT:\nNo external news context available. Focus solely on the transcript for analysis.\n\n"
-        full_prompt = f"{news_context}TRANSCRIPT:\n{transcript}\n\nTASK:\n{prompt}"
+        user_content = f"{news_context}\n\nTRANSCRIPT:\n{transcript}"
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a sharp political analyst. Rewrite the transcript into a short social post under 1300 characters. Use 1–2 simple paragraphs, adding verified facts, dates, and numbers to expand statements. Include direct quotes from the transcript where available and verify names and quotes against the transcript. End with an 8–13 hashtag paragraph. Avoid flourish, speculation, or Trump’s office status."},
-                {"role": "user", "content": full_prompt}
+                {"role": "system", "content": SYS_PROMPT},
+                {"role": "user", "content": user_content},
             ],
             max_tokens=500,
-            temperature=0.5
+            temperature=0.35,
         )
         text = response.choices[0].message.content.strip()
 
