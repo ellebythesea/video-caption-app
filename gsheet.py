@@ -16,7 +16,16 @@ SCOPE = [
     "https://www.googleapis.com/auth/drive",
 ]
 WORKSHEET_NAME = "IGCaptionLog"
+# Current header schema (no Footer column)
 HEADERS = [
+    "Timestamp",
+    "Filename",
+    "Transcript",
+    "Caption",
+    "Error",
+]
+# Legacy header schema (kept for compatibility when locating existing tables)
+LEGACY_HEADERS = [
     "Timestamp",
     "Filename",
     "Transcript",
@@ -67,6 +76,48 @@ def _get_client():
     return gspread.authorize(creds)
 
 
+def _locate_header_row(ws) -> int | None:
+    """Return the 1-based row index where HEADERS exist, else None."""
+    try:
+        values = ws.get_all_values()
+        for i, row in enumerate(values, start=1):
+            # Match either the current or legacy header prefix at column A
+            if row[: len(HEADERS)] == HEADERS or row[: len(LEGACY_HEADERS)] == LEGACY_HEADERS:
+                return i
+    except Exception:
+        pass
+    return None
+
+
+def _ensure_headers_and_get_row(ws) -> int:
+    """Ensure headers start at column A; return header row (1-based).
+
+    If the sheet already contains the expected HEADERS row anywhere, that row
+    is used. Otherwise, the headers are written at the next empty row, starting
+    at column A, without disturbing existing content above.
+    """
+    existing_row = _locate_header_row(ws)
+    if existing_row:
+        # Do not shrink/resize columns when a header already exists; just use it
+        return existing_row
+
+    # Next empty row is one after the last non-empty row returned
+    try:
+        values = ws.get_all_values()
+        start_row = len(values) + 1
+    except Exception:
+        start_row = 1
+
+    # Ensure at least the number of columns in the current schema when creating
+    try:
+        ws.resize(cols=len(HEADERS))
+    except Exception:
+        pass
+
+    ws.update(f"A{start_row}", [HEADERS])
+    return start_row
+
+
 def _get_worksheet():
     """Return the target worksheet, creating it if needed."""
     client = _get_client()
@@ -79,35 +130,36 @@ def _get_worksheet():
 
 
 def setup_sheet_headers():
-    """Ensure the worksheet exists and has the expected headers in row 1."""
+    """Ensure the worksheet exists and headers start at column A.
+
+    If existing content occupies earlier rows, write headers at the next empty
+    row without overwriting. Works with legacy header rows as well.
+    """
     try:
         ws = _get_worksheet()
-        existing = ws.row_values(1)
-        if existing != HEADERS:
-            # Ensure headers are written starting at column A
-            ws.resize(rows=1000, cols=len(HEADERS))
-            ws.update("A1", [HEADERS])
+        _ensure_headers_and_get_row(ws)
         return True
     except Exception as e:
         log_message(f"Error setting up sheet headers: {e}")
         return False
 
 
-def add_to_sheet(filename, transcript, speaker: str = "", footer: str = ""):
+def add_to_sheet(filename, transcript, speaker: str = ""):
     """Append a new row starting at column A.
 
-    Stores Transcript as "[speaker] [transcript]" when a speaker is provided,
-    and saves `footer` in its own column for later concatenation with Caption.
+    Stores Transcript as "[speaker] [transcript]" when a speaker is provided.
     """
     try:
         ws = _get_worksheet()
+        header_row = _ensure_headers_and_get_row(ws)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         transcript_text = transcript or ""
         if speaker:
             transcript_text = f"{speaker} {transcript_text}".strip()
-        row = [timestamp, filename, transcript_text, footer or "", "", ""]
-        # Force appends to start from column A of the table
-        ws.append_row(row, value_input_option="RAW", table_range="A1")
+        # New schema: [Timestamp, Filename, Transcript, Caption, Error]
+        row = [timestamp, filename, transcript_text, "", ""]
+        # Anchor appends to the header row's table starting at column A
+        ws.append_row(row, value_input_option="RAW", table_range=f"A{header_row}")
         # Return the 1-based row index of the appended row
         last_row = len(ws.get_all_values())
         return last_row
@@ -121,14 +173,16 @@ def update_caption_row(row_index: int, caption_text: str):
     try:
         ws = _get_worksheet()
         # Ensure headers mapping; Caption is the 5th column in HEADERS (1-based index 5)
-        # But in case of header drift, calculate dynamically
-        header = ws.row_values(1)
+        # But in case of header drift or header not at row 1, calculate dynamically
+        header_row = _ensure_headers_and_get_row(ws)
+        header = ws.row_values(header_row)
         try:
             col_idx = header.index("Caption") + 1
         except ValueError:
             # Repair headers and try again
             setup_sheet_headers()
-            header = ws.row_values(1)
+            header_row = _ensure_headers_and_get_row(ws)
+            header = ws.row_values(header_row)
             col_idx = header.index("Caption") + 1
         ws.update_cell(row_index, col_idx, caption_text)
         return True
@@ -145,27 +199,28 @@ def process_sheet_rows(process_caption_fn):
     caption. On failure, sets Status to 'error' and writes the error message.
     """
     ws = _get_worksheet()
+    # Ensure headers and find their row
+    header_row = _ensure_headers_and_get_row(ws)
     # Read all values at once
     values = ws.get_all_values()
     if not values:
         return
 
     # Map header indexes
-    header = values[0]
+    header = values[header_row - 1] if len(values) >= header_row else HEADERS
     index = {name: i for i, name in enumerate(header)}
-    required = ["Transcript", "Footer", "Caption", "Error"]
+    required = ["Transcript", "Caption", "Error"]
     if not all(col in index for col in required):
         # Attempt to repair headers
         setup_sheet_headers()
         values = ws.get_all_values()
-        header = values[0] if values else HEADERS
+        header = values[header_row - 1] if len(values) >= header_row else HEADERS
         index = {name: i for i, name in enumerate(header)}
 
-    # Iterate rows (1-based in Sheets; skip header which is row 1)
-    for r, row in enumerate(values[1:], start=2):
+    # Iterate rows (1-based in Sheets; skip header row)
+    for r, row in enumerate(values[header_row:], start=header_row + 1):
         try:
             transcript = row[index.get("Transcript", 0)] if len(row) > index.get("Transcript", 0) else ""
-            footer = row[index.get("Footer", 0)] if len(row) > index.get("Footer", 0) else ""
             caption_existing = row[index.get("Caption", 0)] if len(row) > index.get("Caption", 0) else ""
 
             if not transcript:
@@ -174,9 +229,8 @@ def process_sheet_rows(process_caption_fn):
             if caption_existing:
                 continue
 
-            # Generate caption and append footer in the same cell
-            base_caption = process_caption_fn(transcript, "")
-            final_caption = f"{base_caption}\n\n{footer}" if footer else base_caption
+            # Generate caption (no footer support in new schema)
+            final_caption = process_caption_fn(transcript, "")
 
             # Write back results
             ws.update_cell(r, index.get("Caption", 4) + 1, final_caption)

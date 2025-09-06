@@ -1,8 +1,10 @@
 .env
 credentials.json
+.env.staging
 __pycache__/
 *.pyc
 *.save
 chatgpt_enhancement_log.txt
 *.toml
 *.b64
+.venv-staging/
