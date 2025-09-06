@@ -231,8 +231,11 @@ if videos:
                         st.markdown("<span style='color:#cc0000'>Exceeds 25 MB limit; will be skipped.</span>", unsafe_allow_html=True)
                 # Per-item metadata inputs
                 speaker_key = f"speaker_{start}_{idx}_{v['name']}"
+                footer_key = f"footer_{start}_{idx}_{v['name']}"
                 speaker_val = st.text_input("Name", key=speaker_key, value=v.get("speaker", ""))
+                footer_val = st.text_area("Footer", key=footer_key, value=v.get("footer", ""), height=80)
                 v["speaker"] = speaker_val
+                v["footer"] = footer_val
 
     c1, c2 = st.columns([1,1])
     clear_clicked = c2.button("Clear queued list")
@@ -273,7 +276,8 @@ if videos:
                     else:
                         try:
                             combined_transcript = (v.get("speaker", "") + " " + transcript).strip() if v.get("speaker") else transcript
-                            final_caption = process_caption(combined_transcript, "")
+                            base_caption = process_caption(combined_transcript, "")
+                            final_caption = base_caption + ("\n\n" + v.get("footer", "") if v.get("footer") else "")
                             if update_caption_row(int(row_idx), final_caption):
                                 v["status"] = "captioned"
                             else:
