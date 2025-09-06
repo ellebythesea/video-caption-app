@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 from typing import Optional
+import re
 
 from config import OPENAI_API_KEY, TRIM_SILENCE, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_BITRATE
 from logger import log_message
@@ -16,7 +17,7 @@ def _get_ffmpeg_path() -> str:
     back to the system's `ffmpeg` in PATH.
     """
     try:
-        import imageio_ffmpeg
+        import imageio_ffmpeg  # type: ignore
 
         return imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
@@ -122,7 +123,24 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
             max_tokens=500,
             temperature=0.5
         )
-        return response.choices[0].message.content.strip()
+        text = response.choices[0].message.content.strip()
+
+        # Post-process to avoid phrases like "Former President Trump"
+        def sanitize_caption(s: str) -> str:
+            # Replace variants with "President Trump" and preserve possessive
+            def repl_president(m):
+                suffix = m.group(1) or ""
+                return "President Trump" + suffix
+
+            patterns = [
+                r"(?i)\bformer\s+(?:u\.?s\.?\s+)?president\s+(?:donald\s+(?:j\.?\s+)?trump|trump)(’s|'s)?",
+                r"(?i)\bex[-\s]?president\s+(?:donald\s+(?:j\.?\s+)?trump|trump)(’s|'s)?",
+            ]
+            for pat in patterns:
+                s = re.sub(pat, repl_president, s)
+            return s
+
+        return sanitize_caption(text)
     except Exception as e:
         log_message(f"Error with ChatGPT API: {str(e)}")
         return f"Error processing with ChatGPT: {str(e)}"

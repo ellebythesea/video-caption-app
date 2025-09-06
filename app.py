@@ -219,7 +219,7 @@ if videos:
         for idx, v in enumerate(row_items):
             with cols[idx]:
                 if v.get("thumb_path") and os.path.exists(v["thumb_path"]):
-                    st.image(v["thumb_path"], use_container_width=True)
+                    st.image(v["thumb_path"], width='stretch')
                 else:
                     st.write("[no preview]")
                 st.text(v["name"][:60])
