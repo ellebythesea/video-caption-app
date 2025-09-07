@@ -17,3 +17,8 @@ TRIM_SILENCE = os.getenv("TRIM_SILENCE", "false").lower() in {"1", "true", "yes"
 AUDIO_SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
 AUDIO_CHANNELS = int(os.getenv("AUDIO_CHANNELS", "1"))
 AUDIO_BITRATE = os.getenv("AUDIO_BITRATE", "32k")
+
+# Caption generation options
+CAPTION_MODEL = os.getenv("CAPTION_MODEL", "gpt-4o")
+CAPTION_TEMPERATURE = float(os.getenv("CAPTION_TEMPERATURE", "0.5"))
+CAPTION_MAX_TOKENS = int(os.getenv("CAPTION_MAX_TOKENS", "800"))
