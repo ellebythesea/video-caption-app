@@ -237,41 +237,7 @@ if videos:
                 v["speaker"] = speaker_val
                 v["footer"] = footer_val
 
-                # If item already processed, offer re-run controls
-                if v.get("status") in {"captioned", "done"} and v.get("row_idx"):
-                    c_run, c_cap = st.columns(2)
-                    if c_run.button("Run again", key=f"run_again_{start}_{idx}_{v['name']}"):
-                        # Re-transcribe and recaption, updating both transcript and caption cells
-                        tr = transcribe_video(v["path"]) or ""
-                        if tr:
-                            combined = (v.get("speaker", "") + " " + tr).strip() if v.get("speaker") else tr
-                            from gsheet import update_transcript_row, update_caption_row  # local import to avoid circular
-                            base_caption = process_caption(combined, "")
-                            final_caption = base_caption + ("\n\n" + v.get("footer", "") if v.get("footer") else "")
-                            ok_t = update_transcript_row(int(v["row_idx"]), combined if v.get("speaker") else tr)
-                            ok_c = update_caption_row(int(v["row_idx"]), final_caption)
-                            if ok_t and ok_c:
-                                v["status"] = "captioned"
-                                st.success("Re-ran transcription and caption.")
-                            else:
-                                st.error("Failed to update sheet on re-run.")
-                        else:
-                            st.error("Re-transcription failed.")
-                    if c_cap.button("Caption only", key=f"caption_only_{start}_{idx}_{v['name']}"):
-                        # Recompute caption from existing transcript in sheet
-                        from gsheet import get_transcript_row, update_caption_row  # local import
-                        tr = get_transcript_row(int(v["row_idx"])) or ""
-                        if tr:
-                            combined = (v.get("speaker", "") + " " + tr).strip() if v.get("speaker") else tr
-                            base_caption = process_caption(combined, "")
-                            final_caption = base_caption + ("\n\n" + v.get("footer", "") if v.get("footer") else "")
-                            if update_caption_row(int(v["row_idx"]), final_caption):
-                                v["status"] = "captioned"
-                                st.success("Re-generated caption.")
-                            else:
-                                st.error("Failed to update caption cell.")
-                        else:
-                            st.error("Could not read existing transcript from sheet.")
+                # Previously offered re-run controls here; removed per request
 
     c1, c2 = st.columns([1,1])
     clear_clicked = c2.button("Clear queued list")
