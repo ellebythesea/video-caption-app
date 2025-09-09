@@ -5,7 +5,14 @@ import tempfile
 from typing import Optional
 import re
 
-from config import OPENAI_API_KEY, TRIM_SILENCE, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_BITRATE
+from config import (
+    OPENAI_API_KEY,
+    TRIM_SILENCE,
+    AUDIO_SAMPLE_RATE,
+    AUDIO_CHANNELS,
+    AUDIO_BITRATE,
+    CAPTION_SPLIT_THRESHOLD,
+)
 from logger import log_message
 from news import get_latest_news_summary
 
@@ -104,6 +111,117 @@ def transcribe_video(video_path):
         except Exception:
             pass
 
+def _format_caption_for_readability(text: str) -> str:
+    """Ensure reasonable line breaks and hashtag placement.
+
+    - Normalizes line endings.
+    - If no line breaks are present, inserts a newline after sentence endings.
+    - Moves trailing hashtag block to its own final line, separated by a blank line.
+    """
+    try:
+        s = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+        # Detect trailing hashtag block (one or more hashtags near the end)
+        tag_block = None
+        m = re.search(r"(\s*(?:#[\w\d_]+)(?:\s*#[\w\d_]+)+)\s*$", s)
+        if m:
+            tag_block = m.group(1)
+            s = s[: m.start()].rstrip()
+
+        # Normalize excessive blank lines
+        s = re.sub(r"\n{3,}", "\n\n", s).strip()
+
+        # Build up to two paragraphs from existing breaks or by splitting sentences
+        paragraphs: list[str] = []
+        if "\n\n" in s:
+            parts = s.split("\n\n")
+            # Clean inner single linebreaks inside each paragraph
+            parts = [" ".join(p.strip().splitlines()) for p in parts]
+            if len(parts) <= 2:
+                paragraphs = parts
+            else:
+                # Keep first as is; merge the rest into second
+                paragraphs = [parts[0], " ".join(parts[1:]).strip()]
+        else:
+            # No explicit paragraphs; split into sentences and form 1–2 paragraphs
+            sentences = re.split(r'(?<=[.!?…][)\]\}"\'”’]?)\s+', s)
+            sentences = [seg.strip() for seg in sentences if seg.strip()]
+            base_body = " ".join(sentences)
+            if len(sentences) <= 2:
+                # If short, keep one paragraph. If long, force two when possible.
+                if len(base_body) > CAPTION_SPLIT_THRESHOLD and len(sentences) >= 2:
+                    paragraphs = [sentences[0], " ".join(sentences[1:]).strip()]
+                elif len(base_body) > CAPTION_SPLIT_THRESHOLD and len(sentences) == 1:
+                    # Heuristic split: prefer last comma/semicolon near 40–60% region
+                    n = len(base_body)
+                    lo = int(n * 0.35)
+                    hi = int(n * 0.65)
+                    cut = -1
+                    for i in range(hi, lo, -1):
+                        if base_body[i-1] in ",;:" and i < n - 10:
+                            cut = i
+                            break
+                    if cut == -1:
+                        # Fallback: nearest space to midpoint
+                        mid = n // 2
+                        left = base_body.rfind(" ", 0, mid)
+                        right = base_body.find(" ", mid)
+                        if left == -1 and right == -1:
+                            paragraphs = [base_body]
+                        else:
+                            if left == -1:
+                                cut = right
+                            elif right == -1:
+                                cut = left
+                            else:
+                                cut = left if (mid - left) <= (right - mid) else right
+                    if cut != -1:
+                        p1 = base_body[:cut].strip()
+                        p2 = base_body[cut:].strip()
+                        paragraphs = [p1, p2] if p2 else [p1]
+                    else:
+                        paragraphs = [base_body]
+                else:
+                    paragraphs = [base_body]
+            else:
+                total_len = sum(len(x) for x in sentences)
+                target = max(total_len // 2, 1)
+                acc = []
+                acc_len = 0
+                for i, sent in enumerate(sentences):
+                    acc.append(sent)
+                    acc_len += len(sent)
+                    # Ensure at least one sentence remains for paragraph 2
+                    if acc_len >= target and i < len(sentences) - 1:
+                        break
+                p1 = " ".join(acc).strip()
+                p2 = " ".join(sentences[len(acc):]).strip()
+                if p2:
+                    paragraphs = [p1, p2]
+                else:
+                    paragraphs = [p1]
+
+        body = "\n\n".join([p for p in paragraphs if p])
+
+        # Rebuild with hashtags block, ensuring separation
+        if tag_block:
+            # Normalize spaces within tags line and dedupe while preserving order
+            tags = re.findall(r"#[\w\d_]+", tag_block)
+            seen = set()
+            deduped = []
+            for t in tags:
+                if t not in seen:
+                    seen.add(t)
+                    deduped.append(t)
+            tags_line = " ".join(deduped).strip()
+            if tags_line:
+                return f"{body}\n\n{tags_line}" if body else tags_line
+        return body
+    except Exception:
+        # Fail open: return original text if formatting fails
+        return text
+
+
 def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
     try:
         # Cleaned prompt structure: all guidance in the system message; user carries only context and transcript
@@ -146,7 +264,8 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
                 s = re.sub(pat, repl_president, s)
             return s
 
-        return sanitize_caption(text)
+        formatted = _format_caption_for_readability(sanitize_caption(text))
+        return formatted
     except Exception as e:
         log_message(f"Error with ChatGPT API: {str(e)}")
         return f"Error processing with ChatGPT: {str(e)}"
