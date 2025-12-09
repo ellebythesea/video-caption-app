@@ -4,6 +4,7 @@ import os
 import hmac
 import hashlib
 import base64
+import re
 from datetime import date
 from config import GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY, APP_PASSWORD
 from logger import log_message
@@ -162,6 +163,20 @@ if "uploaded_videos" not in st.session_state:
     st.session_state["uploaded_videos"] = []  # list of {name, path}
 
 MAX_TRANSCRIBE_MB = 25.0
+IGNORED_PHRASES = [
+    "Help this information get to more voters. 🇺🇸 A well-informed electorate is a prerequisite to Democracy.—Thomas Jefferson",
+]
+
+
+def _strip_ignored_phrases(text: str) -> str:
+    """Remove boilerplate phrases users may paste into inputs or that appear in transcripts."""
+    if not text:
+        return ""
+    cleaned = str(text)
+    for phrase in IGNORED_PHRASES:
+        pattern = re.compile(re.escape(phrase), flags=re.IGNORECASE)
+        cleaned = pattern.sub(" ", cleaned)
+    return " ".join(cleaned.split())
 
 if uploaded_files:
     existing = {v["name"] for v in st.session_state["uploaded_videos"]}
@@ -182,6 +197,40 @@ if uploaded_files:
 videos = st.session_state.get("uploaded_videos", [])
 
 if videos:
+    st.markdown(
+        """
+        <style>
+          #video-grid div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            width: 16.6667% !important;
+            flex: 0 0 16.6667% !important;
+            padding-left: 0.35rem;
+            padding-right: 0.35rem;
+          }
+          #video-grid div[data-testid="column"] img {
+            width: 100% !important;
+            height: 160px !important;
+            object-fit: cover;
+          }
+          @media (max-width: 900px) {
+            #video-grid div[data-testid="stHorizontalBlock"] {
+              flex-wrap: wrap !important;
+            }
+            #video-grid div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+              width: 33.3333% !important;
+              flex: 0 0 33.3333% !important;
+              padding-left: 0.25rem;
+              padding-right: 0.25rem;
+            }
+            #video-grid div[data-testid="column"] img {
+              width: 100% !important;
+              height: 160px !important;
+              object-fit: cover;
+            }
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     # Ensure thumbnails exist for display
     for v in videos:
         if not v.get("thumb_path"):
@@ -211,11 +260,12 @@ if videos:
                 except Exception:
                     pass
 
-    st.caption("Queued files (3 across previews)")
-    # Render a true 3-across grid by chunking into rows
-    for start in range(0, len(videos), 3):
-        row_items = videos[start:start+3]
-        cols = st.columns(3)
+    st.caption("Queued files (6 across on desktop; 3 across on mobile)")
+    st.markdown('<div id="video-grid">', unsafe_allow_html=True)
+    # Render a 6-across grid on desktop, collapses to 3 on mobile via CSS
+    for start in range(0, len(videos), 6):
+        row_items = videos[start:start+6]
+        cols = st.columns(6)
         for idx, v in enumerate(row_items):
             with cols[idx]:
                 if v.get("thumb_path") and os.path.exists(v["thumb_path"]):
@@ -231,16 +281,17 @@ if videos:
                         st.markdown("<span style='color:#cc0000'>Exceeds 25 MB limit; will be skipped.</span>", unsafe_allow_html=True)
                 # Per-item metadata inputs
                 speaker_key = f"speaker_{start}_{idx}_{v['name']}"
-                footer_key = f"footer_{start}_{idx}_{v['name']}"
-                speaker_val = st.text_input("Name", key=speaker_key, value=v.get("speaker", ""))
-                footer_val = st.text_area("Footer", key=footer_key, value=v.get("footer", ""), height=80)
-                v["speaker"] = speaker_val
-                v["footer"] = footer_val
-
-                # Previously offered re-run controls here; removed per request
+                raw_speaker = st.text_area(
+                    "Name",
+                    key=speaker_key,
+                    value=v.get("speaker", ""),
+                    height=100,
+                )
+                v["speaker"] = _strip_ignored_phrases(raw_speaker)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     c1, c2 = st.columns([1,1])
-    clear_clicked = c2.button("Clear queued list")
+    clear_clicked = c2.button("Reset page")
     process_clicked = c1.button("Transcribe and Add All")
     if clear_clicked:
         for v in videos:
@@ -250,7 +301,7 @@ if videos:
                         os.unlink(p)
                 except Exception:
                     pass
-        st.session_state["uploaded_videos"] = []
+        st.session_state.clear()
         try:
             st.rerun()
         except Exception:
@@ -270,16 +321,21 @@ if videos:
 
                 v["status"] = "transcribing"
                 transcript = transcribe_video(v["path"]) or ""
-                if transcript:
-                    row_idx = add_to_sheet(v["name"], transcript, v.get("speaker", ""))
+                cleaned_transcript = _strip_ignored_phrases(transcript)
+                speaker_text = v.get("speaker", "")
+                if cleaned_transcript:
+                    row_idx = add_to_sheet(v["name"], cleaned_transcript, speaker_text)
                     if not row_idx:
                         v["status"] = "sheet error"
                         st.error(f"Failed to add {v['name']} to sheet.")
                     else:
                         try:
-                            combined_transcript = (v.get("speaker", "") + " " + transcript).strip() if v.get("speaker") else transcript
-                            base_caption = process_caption(combined_transcript, "")
-                            final_caption = base_caption + ("\n\n" + v.get("footer", "") if v.get("footer") else "")
+                            combined_transcript = (
+                                (speaker_text + " " + cleaned_transcript).strip()
+                                if speaker_text
+                                else cleaned_transcript
+                            )
+                            final_caption = process_caption(combined_transcript, "")
                             if update_caption_row(int(row_idx), final_caption):
                                 v["status"] = "captioned"
                                 v["row_idx"] = int(row_idx)
