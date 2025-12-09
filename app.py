@@ -183,10 +183,13 @@ if not _check_password():
 # Initialize sheet after auth so we don't touch APIs while locked
 setup_sheet_headers()
 
+reset_counter = st.session_state.get("reset_counter", 0)
+
 uploaded_files = st.file_uploader(
     "Upload one or more videos from your phone",
     type=["mp4", "mov", "avi"],
     accept_multiple_files=True,
+    key=f"uploader_{reset_counter}",
 )
 
 # Keep temporary files across reruns for a single session
@@ -277,9 +280,11 @@ if videos:
     if reset_clicked:
         _cleanup_uploaded_files(videos)
         was_authenticated = st.session_state.get("authenticated", False)
+        reset_counter = st.session_state.get("reset_counter", 0) + 1
         st.session_state.clear()
         if was_authenticated:
             st.session_state["authenticated"] = True
+        st.session_state["reset_counter"] = reset_counter
         try:
             st.rerun()
         except Exception:
