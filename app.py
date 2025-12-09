@@ -197,6 +197,20 @@ if "uploaded_videos" not in st.session_state:
     st.session_state["uploaded_videos"] = []  # list of {name, path}
 
 MAX_TRANSCRIBE_MB = 25.0
+IGNORED_PHRASES = [
+    "Help this information get to more voters. 🇺🇸 A well-informed electorate is a prerequisite to Democracy.—Thomas Jefferson",
+]
+
+
+def _strip_ignored_phrases(text: str) -> str:
+    """Remove boilerplate phrases users may paste into inputs or that appear in transcripts."""
+    if not text:
+        return ""
+    cleaned = str(text)
+    for phrase in IGNORED_PHRASES:
+        pattern = re.compile(re.escape(phrase), flags=re.IGNORECASE)
+        cleaned = pattern.sub(" ", cleaned)
+    return " ".join(cleaned.split())
 
 if uploaded_files:
     existing = {v["name"] for v in st.session_state["uploaded_videos"]}
@@ -217,6 +231,40 @@ if uploaded_files:
 videos = st.session_state.get("uploaded_videos", [])
 
 if videos:
+    st.markdown(
+        """
+        <style>
+          #video-grid div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            width: 16.6667% !important;
+            flex: 0 0 16.6667% !important;
+            padding-left: 0.35rem;
+            padding-right: 0.35rem;
+          }
+          #video-grid div[data-testid="column"] img {
+            width: 100% !important;
+            height: 160px !important;
+            object-fit: cover;
+          }
+          @media (max-width: 900px) {
+            #video-grid div[data-testid="stHorizontalBlock"] {
+              flex-wrap: wrap !important;
+            }
+            #video-grid div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+              width: 33.3333% !important;
+              flex: 0 0 33.3333% !important;
+              padding-left: 0.25rem;
+              padding-right: 0.25rem;
+            }
+            #video-grid div[data-testid="column"] img {
+              width: 100% !important;
+              height: 160px !important;
+              object-fit: cover;
+            }
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     # Ensure thumbnails exist for display
     for v in videos:
         if not v.get("thumb_path"):
@@ -307,8 +355,10 @@ if videos:
 
                 v["status"] = "transcribing"
                 transcript = transcribe_video(v["path"]) or ""
-                if transcript:
-                    row_idx = add_to_sheet(v["name"], transcript, v.get("speaker", ""))
+                cleaned_transcript = _strip_ignored_phrases(transcript)
+                speaker_text = v.get("speaker", "")
+                if cleaned_transcript:
+                    row_idx = add_to_sheet(v["name"], cleaned_transcript, speaker_text)
                     if not row_idx:
                         v["status"] = "sheet error"
                         st.error(f"Failed to add {v['name']} to sheet.")
