@@ -80,9 +80,9 @@ if not all([GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY]):
     st.stop()
 
 def _today_token(secret: str) -> str:
-    """Return a URL-safe token valid for today's date using HMAC-SHA256."""
-    today = date.today().isoformat()
-    digest = hmac.new(secret.encode("utf-8"), today.encode("utf-8"), hashlib.sha256).digest()
+    """Return a URL-safe token valid for the current month using HMAC-SHA256."""
+    month_key = f"{date.today().year}-{date.today().month:02d}"
+    digest = hmac.new(secret.encode("utf-8"), month_key.encode("utf-8"), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
 
 
