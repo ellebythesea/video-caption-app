@@ -4,11 +4,32 @@ import os
 import hmac
 import hashlib
 import base64
+import re
 from datetime import date
 from config import GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY, APP_PASSWORD
 from logger import log_message
 from gsheet import setup_sheet_headers, add_to_sheet, process_sheet_rows, update_caption_row
 from openai_utils import transcribe_video, process_caption
+
+IGNORED_PHRASE = (
+    "Help this information get to more voters. "
+    "\U0001F1FA\U0001F1F8 A well-informed electorate is a prerequisite to Democracy.\u2014Thomas Jefferson"
+)
+
+
+def _strip_ignored_phrase(text: str) -> str:
+    """Remove the canned share message when pasted into inputs."""
+    if not text:
+        return ""
+    cleaned = text
+    variants = [
+        IGNORED_PHRASE,
+        IGNORED_PHRASE.replace("\U0001F1FA\U0001F1F8 ", ""),
+        IGNORED_PHRASE.replace("\u2014", "-"),
+    ]
+    for phrase in variants:
+        cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 def _ffmpeg_thumb(video_path: str) -> str | None:
@@ -43,14 +64,25 @@ def _ffmpeg_thumb(video_path: str) -> str | None:
     except Exception:
         return None
 
+
+def _cleanup_uploaded_files(videos: list[dict]) -> None:
+    """Delete temporary upload/thumbnail files."""
+    for v in videos:
+        for p in (v.get("path"), v.get("thumb_path")):
+            try:
+                if p and os.path.exists(p):
+                    os.unlink(p)
+            except Exception:
+                pass
+
 if not all([GOOGLE_SHEET_ID, OPENAI_API_KEY, SERPER_API_KEY]):
     st.error("Missing required environment variables! Set them in .env or Streamlit secrets.")
     st.stop()
 
 def _today_token(secret: str) -> str:
-    """Return a URL-safe token valid for today's date using HMAC-SHA256."""
-    today = date.today().isoformat()
-    digest = hmac.new(secret.encode("utf-8"), today.encode("utf-8"), hashlib.sha256).digest()
+    """Return a URL-safe token valid for the current month using HMAC-SHA256."""
+    month_key = f"{date.today().year}-{date.today().month:02d}"
+    digest = hmac.new(secret.encode("utf-8"), month_key.encode("utf-8"), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
 
 
@@ -120,7 +152,7 @@ def _check_password():
 st.set_page_config(layout="wide")
 st.title("Video Caption Generator")
 
-# Force a 3-across grid on narrow screens and shrink image previews
+# Force a 3-across grid on narrow screens; desktop renders 6 columns via st.columns
 st.markdown(
     """
     <style>
@@ -211,11 +243,11 @@ if videos:
                 except Exception:
                     pass
 
-    st.caption("Queued files (3 across previews)")
-    # Render a true 3-across grid by chunking into rows
-    for start in range(0, len(videos), 3):
-        row_items = videos[start:start+3]
-        cols = st.columns(3)
+    st.caption("Queued files (6 across previews)")
+    # Render a true 6-across grid by chunking into rows
+    for start in range(0, len(videos), 6):
+        row_items = videos[start:start+6]
+        cols = st.columns(6)
         for idx, v in enumerate(row_items):
             with cols[idx]:
                 if v.get("thumb_path") and os.path.exists(v["thumb_path"]):
@@ -231,30 +263,30 @@ if videos:
                         st.markdown("<span style='color:#cc0000'>Exceeds 25 MB limit; will be skipped.</span>", unsafe_allow_html=True)
                 # Per-item metadata inputs
                 speaker_key = f"speaker_{start}_{idx}_{v['name']}"
-                footer_key = f"footer_{start}_{idx}_{v['name']}"
-                speaker_val = st.text_input("Name", key=speaker_key, value=v.get("speaker", ""))
-                footer_val = st.text_area("Footer", key=footer_key, value=v.get("footer", ""), height=80)
+                raw_speaker = st.text_area("Name", key=speaker_key, value=v.get("speaker", ""), height=96)
+                speaker_val = _strip_ignored_phrase(raw_speaker)
+                if speaker_val != raw_speaker:
+                    st.session_state[speaker_key] = speaker_val
                 v["speaker"] = speaker_val
-                v["footer"] = footer_val
 
                 # Previously offered re-run controls here; removed per request
 
     c1, c2 = st.columns([1,1])
-    clear_clicked = c2.button("Clear queued list")
+    reset_clicked = c2.button("Reset page")
     process_clicked = c1.button("Transcribe and Add All")
-    if clear_clicked:
-        for v in videos:
-            for p in (v.get("path"), v.get("thumb_path")):
-                try:
-                    if p and os.path.exists(p):
-                        os.unlink(p)
-                except Exception:
-                    pass
-        st.session_state["uploaded_videos"] = []
+    if reset_clicked:
+        _cleanup_uploaded_files(videos)
+        was_authenticated = st.session_state.get("authenticated", False)
+        st.session_state.clear()
+        if was_authenticated:
+            st.session_state["authenticated"] = True
         try:
             st.rerun()
         except Exception:
-            pass
+            try:
+                st.experimental_rerun()
+            except Exception:
+                pass
 
     if process_clicked:
         progress = st.progress(0)
@@ -279,8 +311,7 @@ if videos:
                         try:
                             combined_transcript = (v.get("speaker", "") + " " + transcript).strip() if v.get("speaker") else transcript
                             base_caption = process_caption(combined_transcript, "")
-                            final_caption = base_caption + ("\n\n" + v.get("footer", "") if v.get("footer") else "")
-                            if update_caption_row(int(row_idx), final_caption):
+                            if update_caption_row(int(row_idx), base_caption):
                                 v["status"] = "captioned"
                                 v["row_idx"] = int(row_idx)
                             else:
