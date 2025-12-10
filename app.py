@@ -21,7 +21,7 @@ def _strip_ignored_phrase(text: str) -> str:
     """Remove the canned share message when pasted into inputs."""
     if not text:
         return ""
-    cleaned = text
+    cleaned = str(text)
     variants = [
         IGNORED_PHRASE,
         IGNORED_PHRASE.replace("\U0001F1FA\U0001F1F8 ", ""),
@@ -29,7 +29,7 @@ def _strip_ignored_phrase(text: str) -> str:
     ]
     for phrase in variants:
         cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
-    return cleaned.strip()
+    return " ".join(cleaned.split())
 
 
 def _ffmpeg_thumb(video_path: str) -> str | None:
@@ -152,15 +152,15 @@ def _check_password():
 st.set_page_config(layout="wide")
 st.title("Video Caption Generator")
 
-# Force a 3-across grid on narrow screens; desktop renders 6 columns via st.columns
+# Force a 2-across grid on narrow screens; desktop renders 4 columns via st.columns
 st.markdown(
     """
     <style>
-      /* Keep 3 columns even on mobile */
+      /* Keep 2 columns on mobile */
       @media (max-width: 900px) {
         div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-          width: 33.3333% !important;
-          flex: 0 0 33.3333% !important;
+          width: 50% !important;
+          flex: 0 0 50% !important;
           padding-left: 0.25rem;
           padding-right: 0.25rem;
         }
@@ -197,21 +197,6 @@ if "uploaded_videos" not in st.session_state:
     st.session_state["uploaded_videos"] = []  # list of {name, path}
 
 MAX_TRANSCRIBE_MB = 25.0
-IGNORED_PHRASES = [
-    "Help this information get to more voters. 🇺🇸 A well-informed electorate is a prerequisite to Democracy.—Thomas Jefferson",
-]
-
-
-def _strip_ignored_phrases(text: str) -> str:
-    """Remove boilerplate phrases users may paste into inputs or that appear in transcripts."""
-    if not text:
-        return ""
-    cleaned = str(text)
-    for phrase in IGNORED_PHRASES:
-        pattern = re.compile(re.escape(phrase), flags=re.IGNORECASE)
-        cleaned = pattern.sub(" ", cleaned)
-    return " ".join(cleaned.split())
-
 if uploaded_files:
     existing = {v["name"] for v in st.session_state["uploaded_videos"]}
     for uf in uploaded_files:
@@ -235,8 +220,8 @@ if videos:
         """
         <style>
           #video-grid div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-            width: 16.6667% !important;
-            flex: 0 0 16.6667% !important;
+            width: 25% !important;
+            flex: 0 0 25% !important;
             padding-left: 0.35rem;
             padding-right: 0.35rem;
           }
@@ -250,8 +235,8 @@ if videos:
               flex-wrap: wrap !important;
             }
             #video-grid div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-              width: 33.3333% !important;
-              flex: 0 0 33.3333% !important;
+              width: 50% !important;
+              flex: 0 0 50% !important;
               padding-left: 0.25rem;
               padding-right: 0.25rem;
             }
@@ -294,11 +279,12 @@ if videos:
                 except Exception:
                     pass
 
-    st.caption("Queued files (6 across previews)")
-    # Render a true 6-across grid by chunking into rows
-    for start in range(0, len(videos), 6):
-        row_items = videos[start:start+6]
-        cols = st.columns(6)
+    st.caption("Queued files (4 across on desktop; 2 across on mobile)")
+    st.markdown('<div id="video-grid">', unsafe_allow_html=True)
+    # Render a 4-across grid on desktop, collapses to 2 on mobile via CSS
+    for start in range(0, len(videos), 4):
+        row_items = videos[start:start+4]
+        cols = st.columns(4)
         for idx, v in enumerate(row_items):
             with cols[idx]:
                 if v.get("thumb_path") and os.path.exists(v["thumb_path"]):
@@ -355,7 +341,7 @@ if videos:
 
                 v["status"] = "transcribing"
                 transcript = transcribe_video(v["path"]) or ""
-                cleaned_transcript = _strip_ignored_phrases(transcript)
+                cleaned_transcript = _strip_ignored_phrase(transcript)
                 speaker_text = v.get("speaker", "")
                 if cleaned_transcript:
                     row_idx = add_to_sheet(v["name"], cleaned_transcript, speaker_text)
@@ -364,9 +350,13 @@ if videos:
                         st.error(f"Failed to add {v['name']} to sheet.")
                     else:
                         try:
-                            combined_transcript = (v.get("speaker", "") + " " + transcript).strip() if v.get("speaker") else transcript
-                            base_caption = process_caption(combined_transcript, "")
-                            if update_caption_row(int(row_idx), base_caption):
+                            combined_transcript = (
+                                f"{speaker_text} {cleaned_transcript}".strip()
+                                if speaker_text
+                                else cleaned_transcript
+                            )
+                            final_caption = process_caption(combined_transcript, "")
+                            if update_caption_row(int(row_idx), final_caption):
                                 v["status"] = "captioned"
                                 v["row_idx"] = int(row_idx)
                             else:
