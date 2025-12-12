@@ -31,6 +31,11 @@ def _strip_ignored_phrase(text: str) -> str:
         cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
     return " ".join(cleaned.split())
 
+def _sanitize_text_area(key: str) -> None:
+    """Clean a text_area value in-place to avoid Streamlit state errors."""
+    raw = st.session_state.get(key, "")
+    st.session_state[key] = _strip_ignored_phrase(raw)
+
 
 def _ffmpeg_thumb(video_path: str) -> str | None:
     """Try to generate a thumbnail via ffmpeg. Returns image path or None."""
@@ -300,11 +305,16 @@ if videos:
                         st.markdown("<span style='color:#cc0000'>Exceeds 25 MB limit; will be skipped.</span>", unsafe_allow_html=True)
                 # Per-item metadata inputs
                 speaker_key = f"speaker_{start}_{idx}_{v['name']}"
-                raw_speaker = st.text_area("Name", key=speaker_key, value=v.get("speaker", ""), height=96)
-                speaker_val = _strip_ignored_phrase(raw_speaker)
-                if speaker_val != raw_speaker:
-                    st.session_state[speaker_key] = speaker_val
-                v["speaker"] = speaker_val
+                raw_speaker = st.text_area(
+                    "Name",
+                    key=speaker_key,
+                    value=v.get("speaker", ""),
+                    height=96,
+                    on_change=_sanitize_text_area,
+                    args=(speaker_key,),
+                )
+                # Pull the sanitized value from session_state so Streamlit doesn't throw
+                v["speaker"] = _strip_ignored_phrase(st.session_state.get(speaker_key, raw_speaker))
 
                 # Previously offered re-run controls here; removed per request
 
