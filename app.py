@@ -305,10 +305,12 @@ if videos:
                         st.markdown("<span style='color:#cc0000'>Exceeds 25 MB limit; will be skipped.</span>", unsafe_allow_html=True)
                 # Per-item metadata inputs
                 speaker_key = f"speaker_{start}_{idx}_{v['name']}"
+                if speaker_key not in st.session_state:
+                    # Seed the widget state once to avoid default+set conflicts
+                    st.session_state[speaker_key] = v.get("speaker", "")
                 raw_speaker = st.text_area(
                     "Name",
                     key=speaker_key,
-                    value=v.get("speaker", ""),
                     height=96,
                     on_change=_sanitize_text_area,
                     args=(speaker_key,),
