@@ -52,13 +52,14 @@ def _ffmpeg_thumb(video_path: str) -> str | None:
             out_path = imgf.name
 
         # Seek a bit into the video to avoid black frames; grab 1 frame
-        # Using thumbnail filter for a representative frame if possible
+        # Using thumbnail filter for a representative frame if possible. The
+        # -update flag allows writing to a single filename without a %d pattern.
         cmd = (
-            f'"{ffmpeg}" -y -ss 00:00:01 -i "{video_path}" '
-            f'-frames:v 1 -vf "thumbnail,scale=640:-1" -q:v 4 "{out_path}"'
+            f'"{ffmpeg}" -hide_banner -loglevel error -y -ss 00:00:01 -i "{video_path}" '
+            f'-vf "thumbnail,scale=640:-1" -frames:v 1 -update 1 -q:v 4 "{out_path}"'
         )
         rc = os.system(cmd)
-        if rc == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+        if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
             return out_path
         # Cleanup on failure
         try:
