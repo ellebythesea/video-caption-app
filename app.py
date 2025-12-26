@@ -158,6 +158,15 @@ def _check_password():
 st.set_page_config(layout="wide")
 st.title("Video Caption Generator")
 
+# Lightweight health check to allow external pings without auth.
+try:
+    params = getattr(st, "query_params", {}) or {}
+    if params.get("health") == "1":
+        st.write("ok")
+        st.stop()
+except Exception:
+    pass
+
 # Force a 2-across grid on narrow screens; desktop renders 4 columns via st.columns
 st.markdown(
     """
