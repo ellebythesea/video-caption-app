@@ -112,11 +112,11 @@ def transcribe_video(video_path):
             pass
 
 def _format_caption_for_readability(text: str) -> str:
-    """Ensure reasonable line breaks and hashtag placement.
+    """Ensure reasonable line breaks and keep hashtags inline.
 
     - Normalizes line endings.
     - If no line breaks are present, inserts a newline after sentence endings.
-    - Moves trailing hashtag block to its own final line, separated by a blank line.
+    - Avoids trailing hashtag-only lines by inlining tags in paragraph 1 when possible.
     """
     try:
         s = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
@@ -201,11 +201,8 @@ def _format_caption_for_readability(text: str) -> str:
                 else:
                     paragraphs = [p1]
 
-        body = "\n\n".join([p for p in paragraphs if p])
-
-        # Rebuild with hashtags block, ensuring separation
+        # Inline trailing hashtags into paragraph 1 when feasible.
         if tag_block:
-            # Normalize spaces within tags line and dedupe while preserving order
             tags = re.findall(r"#[\w\d_]+", tag_block)
             seen = set()
             deduped = []
@@ -213,9 +210,35 @@ def _format_caption_for_readability(text: str) -> str:
                 if t not in seen:
                     seen.add(t)
                     deduped.append(t)
-            tags_line = " ".join(deduped).strip()
-            if tags_line:
-                return f"{body}\n\n{tags_line}" if body else tags_line
+            if deduped:
+                def tag_to_phrase(tag: str) -> str:
+                    raw = tag.lstrip("#").replace("_", " ")
+                    raw = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", raw)
+                    return re.sub(r"\s+", " ", raw).strip()
+
+                if not paragraphs:
+                    paragraphs = [""]
+
+                p1 = paragraphs[0]
+                for tag in deduped:
+                    if re.search(rf"(?<!\w){re.escape(tag)}(?!\w)", p1):
+                        continue
+                    phrase = tag_to_phrase(tag)
+                    if phrase:
+                        replaced = re.sub(
+                            rf"(?i)\b{re.escape(phrase)}\b",
+                            tag,
+                            p1,
+                            count=1,
+                        )
+                        if replaced != p1:
+                            p1 = replaced
+                            continue
+                    # Fallback: keep tag in paragraph 1 instead of a separate tags line
+                    p1 = f"{p1} {tag}".strip()
+                paragraphs[0] = p1
+
+        body = "\n\n".join([p for p in paragraphs if p])
         return body
     except Exception:
         # Fail open: return original text if formatting fails
@@ -231,10 +254,12 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
             "most important summary in 250 characters or fewer, and it must include all hashtags. Use "
             "3 to 5 relevant hashtags total, prioritizing the main people the post is about, then a "
             "single-word subject hashtag that helps discovery in trending news, then any remaining "
-            "relevant tags. The second paragraph should add a bit more context with verified facts, "
-            "dates, and numbers when relevant. Include direct transcript quotes where available. Verify "
-            "names and quotes carefully. Any hashtag that appears in the caption body counts toward the "
-            "same total of 3 to 5 hashtags. Avoid speculation, flourish, links, or Trump’s current "
+            "relevant tags. Replace the normal word/phrase in the sentence with the hashtag version "
+            "(example: use #DonaldTrump in the sentence instead of Donald Trump), rather than adding a "
+            "separate hashtag-only line at the end. The second paragraph should add a bit more context "
+            "with verified facts, dates, and numbers when relevant. Include direct transcript quotes "
+            "where available. Verify names and quotes carefully. Any hashtag that appears in the caption "
+            "body counts toward the same total of 3 to 5 hashtags. Avoid speculation, flourish, links, or Trump’s current "
             "office status."
         )
         # Optionally allow an extra hint without polluting the user message
