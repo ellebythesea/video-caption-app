@@ -227,13 +227,15 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
         # Cleaned prompt structure: all guidance in the system message; user carries only context and transcript
         SYS_PROMPT = (
             "You are a sharp political analyst. Rewrite the transcript into a short, clear social post "
-            "under 1300 characters. Use 1–2 simple paragraphs. Expand with verified facts, dates, and "
-            "numbers when relevant. Include direct transcript quotes where available. Verify names and "
-            "quotes carefully. End with 5 relevant hashtags. Order hashtags so the first tags are the "
-            "main people the post is about, then one single-word hashtag that captures the post's core "
-            "subject, then any remaining relevant tags. Any hashtag that appears in the caption body "
-            "counts toward the same total of 5 hashtags. Avoid speculation, flourish, links, or "
-            "Trump’s current office status."
+            "under 1300 characters using exactly 2 simple paragraphs. The first paragraph must be the "
+            "most important summary in 250 characters or fewer, and it must include all hashtags. Use "
+            "3 to 5 relevant hashtags total, prioritizing the main people the post is about, then a "
+            "single-word subject hashtag that helps discovery in trending news, then any remaining "
+            "relevant tags. The second paragraph should add a bit more context with verified facts, "
+            "dates, and numbers when relevant. Include direct transcript quotes where available. Verify "
+            "names and quotes carefully. Any hashtag that appears in the caption body counts toward the "
+            "same total of 3 to 5 hashtags. Avoid speculation, flourish, links, or Trump’s current "
+            "office status."
         )
         # Optionally allow an extra hint without polluting the user message
         if prompt:
