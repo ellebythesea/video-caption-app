@@ -259,7 +259,8 @@ def apply_chatgpt_prompt(transcript, prompt="", news_context=""):
             "separate hashtag-only line at the end. The second paragraph should add a bit more context "
             "with verified facts, dates, and numbers when relevant. Include direct transcript quotes "
             "where available. Verify names and quotes carefully. Any hashtag that appears in the caption "
-            "body counts toward the same total of 3 to 5 hashtags. Avoid speculation, flourish, links, or Trump’s current "
+            "body counts toward the same total of 3 to 5 hashtags. Never use these hashtags: #Trump, "
+            "#ICE, #DonaldTrump, #Epstein, #JeffreyEpstein. Avoid speculation, flourish, links, or Trump’s current "
             "office status."
         )
         # Optionally allow an extra hint without polluting the user message
